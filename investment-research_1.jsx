@@ -1,0 +1,820 @@
+import { useState, useEffect } from "react";
+
+// ─── FIXED API: handles tool-use agentic loop ────────────────────────────────
+async function callClaude(userMessage, systemPrompt) {
+  const messages = [{ role: "user", content: userMessage }];
+  let finalText = "";
+
+  for (let i = 0; i < 5; i++) {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1500,
+        tools: [{ type: "web_search_20250305", name: "web_search" }],
+        system: systemPrompt,
+        messages,
+      }),
+    });
+    const data = await res.json();
+    if (!data.content) throw new Error(data.error?.message || "API error");
+
+    // collect any text from this turn
+    const textBlocks = data.content.filter(b => b.type === "text");
+    if (textBlocks.length) finalText = textBlocks.map(b => b.text).join("");
+
+    if (data.stop_reason === "end_turn") break;
+
+    if (data.stop_reason === "tool_use") {
+      // add assistant turn, then tool results
+      messages.push({ role: "assistant", content: data.content });
+      const toolResults = data.content
+        .filter(b => b.type === "tool_use")
+        .map(b => ({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(b.input) }));
+      messages.push({ role: "user", content: toolResults });
+    } else {
+      break;
+    }
+  }
+
+  return finalText || "Couldn't fetch data right now — try again in a moment.";
+}
+
+const SYSTEM = `You are a friendly, knowledgeable investment advisor who explains things in plain, warm language — like a smart friend who happens to know a lot about markets. 
+Avoid jargon. No "alpha", "catalysts", "tailwinds" unless you explain them. Write like you're talking to a real person, not a Bloomberg terminal. 
+Use short paragraphs. Use bullet points for lists. Be honest about uncertainty. 
+Always search the web for current data before responding.`;
+
+// ─── TABS ────────────────────────────────────────────────────────────────────
+const TABS = [
+  { id: "brief",   label: "What's Happening",  emoji: "🌍" },
+  { id: "news",    label: "News by Industry",   emoji: "📰" },
+  { id: "lookup",  label: "Look Up Anything",   emoji: "🔍" },
+  { id: "signals", label: "Quick Scan",          emoji: "⚡" },
+  { id: "report",  label: "Client Letter",       emoji: "✉️" },
+];
+
+const INDUSTRIES = [
+  { id: "tech",       label: "Tech & AI",          emoji: "💻", color: "#6366f1" },
+  { id: "banking",    label: "Banking & Finance",   emoji: "🏦", color: "#0ea5e9" },
+  { id: "healthcare", label: "Healthcare",          emoji: "🏥", color: "#10b981" },
+  { id: "property",   label: "Property & REITs",    emoji: "🏠", color: "#f59e0b" },
+  { id: "energy",     label: "Energy",              emoji: "⚡", color: "#ef4444" },
+  { id: "consumer",   label: "Consumer & Retail",   emoji: "🛍️", color: "#ec4899" },
+  { id: "transport",  label: "Transport & Logistics","emoji": "✈️", color: "#8b5cf6" },
+  { id: "sgmarket",   label: "Singapore Market",    emoji: "🇸🇬", color: "#f97316" },
+];
+
+// ─── SHARED COMPONENTS ───────────────────────────────────────────────────────
+function Spinner({ color = "#6366f1" }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#888", fontSize: 14, padding: "20px 0" }}>
+      <div style={{ width: 18, height: 18, border: `2px solid #eee`, borderTopColor: color, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
+      Fetching the latest info...
+    </div>
+  );
+}
+
+function ResultBox({ text, loading, placeholder }) {
+  if (loading) return <Spinner />;
+  if (!text) return <p style={{ color: "#bbb", fontSize: 14 }}>{placeholder}</p>;
+  return (
+    <div style={{ fontSize: 14, lineHeight: 1.85, color: "#374151", whiteSpace: "pre-wrap" }}>
+      {text.split("\n").map((line, i) => {
+        if (!line.trim()) return <div key={i} style={{ height: 8 }} />;
+        if (line.startsWith("## ") || line.startsWith("### ")) {
+          return <div key={i} style={{ fontWeight: 700, fontSize: 15, color: "#111827", marginTop: 18, marginBottom: 6 }}>{line.replace(/^#+\s*/, "")}</div>;
+        }
+        if (line.startsWith("**") && line.endsWith("**")) {
+          return <div key={i} style={{ fontWeight: 600, color: "#1f2937", marginTop: 12 }}>{line.replace(/\*\*/g, "")}</div>;
+        }
+        if (line.startsWith("- ") || line.startsWith("• ")) {
+          return <div key={i} style={{ display: "flex", gap: 8, marginBottom: 4, paddingLeft: 4 }}><span style={{ color: "#6366f1", marginTop: 2 }}>›</span><span>{line.replace(/^[-•]\s*/, "")}</span></div>;
+        }
+        if (/^\d+\.\s/.test(line)) {
+          return <div key={i} style={{ marginBottom: 4, paddingLeft: 4, color: "#374151" }}>{line}</div>;
+        }
+        return <div key={i}>{line}</div>;
+      })}
+    </div>
+  );
+}
+
+function Chip({ label, active, onClick, color = "#6366f1" }) {
+  return (
+    <button onClick={onClick} style={{
+      background: active ? color : "#f3f4f6",
+      color: active ? "#fff" : "#6b7280",
+      border: "none", borderRadius: 20,
+      padding: "6px 14px", fontSize: 13, cursor: "pointer",
+      fontFamily: "'DM Sans', sans-serif", fontWeight: active ? 600 : 400,
+      transition: "all 0.15s"
+    }}>{label}</button>
+  );
+}
+
+// ─── PDF EXPORT ───────────────────────────────────────────────────────────────
+function exportMarketPDF(snapshots, date) {
+  const GREEN = "#3d6b4f";
+  const LIGHT_GREEN = "#8fbc8f";
+  const PALE = "#e8ede9";
+  const DARK = "#2c3e2d";
+
+  const topicEmojis = {
+    "global markets today": "🌍",
+    "Singapore economy and SGX": "🇸🇬",
+    "US Federal Reserve and interest rates": "📈",
+    "global economy": "🏦",
+    "commodities gold oil": "🛢️",
+    "cryptocurrency Bitcoin": "₿",
+  };
+  const topicTitles = {
+    "global markets today": "Markets Today",
+    "Singapore economy and SGX": "Singapore",
+    "US Federal Reserve and interest rates": "Interest Rates",
+    "global economy": "Global Economy",
+    "commodities gold oil": "Gold & Oil",
+    "cryptocurrency Bitcoin": "Crypto",
+  };
+
+  function parseLines(text) {
+    const lines = text.split("\n").filter(l => l.trim());
+    let html = "";
+    for (const line of lines) {
+      if (line.startsWith("## ") || line.startsWith("### ")) {
+        html += `<div class="section-heading">${line.replace(/^#+\s*/,"")}</div>`;
+      } else if (line.startsWith("- ") || line.startsWith("• ")) {
+        html += `<div class="bullet"><span class="bdt">›</span><span>${line.replace(/^[-•]\s*/,"")}</span></div>`;
+      } else if (line.startsWith("**") && line.endsWith("**")) {
+        html += `<div class="bold-line">${line.replace(/\*\*/g,"")}</div>`;
+      } else if (line.trim()) {
+        html += `<p>${line}</p>`;
+      }
+    }
+    return html;
+  }
+
+  const accentColors = ["#3d6b4f","#4a7c6f","#5a6e4a","#4e6b5a","#3b5e52","#506b42"];
+  const cardsHtml = snapshots.map((s, i) => {
+    const bg = i % 2 === 0 ? "#fff" : PALE;
+    const accent = accentColors[i % accentColors.length];
+    return `
+      <div class="card" style="background:${bg}; border-left:5px solid ${accent};">
+        <div class="card-header" style="background:${accent}">
+          <span class="card-emoji">${topicEmojis[s.topic] || "📊"}</span>
+          <span class="card-title">${topicTitles[s.topic] || s.topic}</span>
+        </div>
+        <div class="card-body">${parseLines(s.text)}</div>
+      </div>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html>
+<html><head><meta charset="UTF-8"><title>Market Update — ${date}</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;600;700&family=Source+Serif+4:ital,wght@0,300;0,400;0,600;1,400&display=swap');
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Source Serif 4',Georgia,serif;background:#f0f4f0;color:#2c3e2d;width:800px;margin:0 auto;}
+.hero{background:linear-gradient(135deg,${DARK} 0%,${GREEN} 60%,${LIGHT_GREEN} 100%);color:#fff;padding:48px 48px 36px;position:relative;overflow:hidden;}
+.hero::before{content:"";position:absolute;top:-40px;right:-40px;width:200px;height:200px;border-radius:50%;background:rgba(255,255,255,0.06);}
+.hero::after{content:"";position:absolute;bottom:-60px;left:60px;width:280px;height:280px;border-radius:50%;background:rgba(255,255,255,0.04);}
+.eyebrow{font-family:'Oswald',sans-serif;font-size:12px;letter-spacing:4px;text-transform:uppercase;color:${LIGHT_GREEN};margin-bottom:10px;}
+.hero-title{font-family:'Oswald',sans-serif;font-size:72px;font-weight:700;line-height:1;letter-spacing:-1px;margin-bottom:6px;}
+.hero-title span{color:${LIGHT_GREEN};}
+.hero-sub{font-family:'Oswald',sans-serif;font-size:16px;font-weight:400;letter-spacing:3px;text-transform:uppercase;opacity:.85;margin-bottom:28px;}
+.hero-bar{display:flex;align-items:center;gap:16px;font-size:13px;color:rgba(255,255,255,0.7);border-top:1px solid rgba(255,255,255,0.2);padding-top:18px;font-family:'Oswald',sans-serif;letter-spacing:1px;}
+.hdot{width:8px;height:8px;border-radius:50%;background:${LIGHT_GREEN};display:inline-block;}
+.intro{background:${DARK};color:rgba(255,255,255,0.82);padding:18px 48px;font-size:14px;font-style:italic;letter-spacing:.3px;}
+.stat-row{background:${PALE};display:flex;border-bottom:3px solid ${GREEN};}
+.stat-item{flex:1;padding:20px 24px;border-right:1px solid #d0dcd0;text-align:center;}
+.stat-item:last-child{border-right:none;}
+.stat-num{font-family:'Oswald',sans-serif;font-size:28px;font-weight:700;color:${GREEN};line-height:1;margin-bottom:4px;}
+.stat-label{font-size:11px;color:#6b7e6b;text-transform:uppercase;letter-spacing:1.5px;font-family:'Oswald',sans-serif;}
+.content{padding:32px 40px;background:#f0f4f0;}
+.sec-title{font-family:'Oswald',sans-serif;font-size:13px;letter-spacing:4px;text-transform:uppercase;color:${GREEN};margin-bottom:20px;display:flex;align-items:center;gap:10px;}
+.sec-title::after{content:"";flex:1;height:1px;background:${LIGHT_GREEN};opacity:.5;}
+.card{border-radius:6px;margin-bottom:20px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.07);page-break-inside:avoid;}
+.card-header{display:flex;align-items:center;gap:10px;padding:12px 20px;color:#fff;}
+.card-emoji{font-size:18px;}
+.card-title{font-family:'Oswald',sans-serif;font-size:15px;letter-spacing:1.5px;text-transform:uppercase;font-weight:600;}
+.card-body{padding:18px 20px;font-size:13px;line-height:1.75;color:#374137;}
+.card-body p{margin-bottom:8px;}
+.section-heading{font-family:'Oswald',sans-serif;font-size:13px;color:${GREEN};font-weight:600;margin:12px 0 4px;text-transform:uppercase;letter-spacing:1px;}
+.bullet{display:flex;gap:8px;margin-bottom:5px;align-items:flex-start;}
+.bdt{color:${GREEN};font-weight:700;font-size:16px;line-height:1.5;flex-shrink:0;}
+.bold-line{font-weight:600;margin:8px 0 4px;color:${DARK};}
+.footer{background:${DARK};color:rgba(255,255,255,.6);padding:20px 48px;font-size:10px;display:flex;justify-content:space-between;align-items:center;font-family:'Oswald',sans-serif;letter-spacing:1px;text-transform:uppercase;}
+.footer strong{color:${LIGHT_GREEN};}
+@media print{body{width:100%;}.card{page-break-inside:avoid;}}
+</style></head><body>
+<div class="hero">
+  <div class="eyebrow">Clearview Insights · Market Intelligence</div>
+  <div class="hero-title">MARKET<span>.</span><br>UPDATE</div>
+  <div class="hero-sub">Your Monthly Financial Briefing</div>
+  <div class="hero-bar"><span class="hdot"></span><span>${date}</span><span>·</span><span>${snapshots.length} Topic${snapshots.length!==1?"s":""} Covered</span><span>·</span><span>Clearview Insights</span></div>
+</div>
+<div class="intro">Here's your plain-English summary of what's been happening across the markets — and what it means for your money.</div>
+<div class="stat-row">
+  <div class="stat-item"><div class="stat-num">${snapshots.length}</div><div class="stat-label">Topics</div></div>
+  <div class="stat-item"><div class="stat-num">${new Date().getFullYear()}</div><div class="stat-label">Year</div></div>
+  <div class="stat-item"><div class="stat-num">${new Date().toLocaleString("default",{month:"short"}).toUpperCase()}</div><div class="stat-label">Month</div></div>
+  <div class="stat-item"><div class="stat-num">AI</div><div class="stat-label">Powered</div></div>
+</div>
+<div class="content">
+  <div class="sec-title">Market Updates</div>
+  ${cardsHtml}
+</div>
+<div class="footer">
+  <div><strong>Clearview Insights</strong> · Market Update · ${date}</div>
+  <div>For informational purposes only · Not financial advice</div>
+</div>
+</body></html>`;
+
+  const w = window.open("", "_blank", "width=900,height=750,scrollbars=yes");
+  if (!w) { alert("Please allow pop-ups to export the PDF, then try again."); return; }
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => { w.focus(); w.print(); }, 800);
+}
+
+// ─── TAB 1: WHAT'S HAPPENING ─────────────────────────────────────────────────
+function WhatsHappeningTab() {
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [topic, setTopic] = useState("global markets today");
+  const [snapshots, setSnapshots] = useState({});   // topic → text cache
+  const [exporting, setExporting] = useState(false);
+
+  const topics = [
+    { id: "global markets today", label: "Markets today" },
+    { id: "Singapore economy and SGX", label: "Singapore" },
+    { id: "US Federal Reserve and interest rates", label: "Interest rates" },
+    { id: "global economy", label: "Global economy" },
+    { id: "commodities gold oil", label: "Gold & Oil" },
+    { id: "cryptocurrency Bitcoin", label: "Crypto" },
+  ];
+
+  const fetchTopic = async (t) => {
+    // use cache if available
+    if (snapshots[t]) { setText(snapshots[t]); setTopic(t); return; }
+    setLoading(true); setText(""); setTopic(t);
+    try {
+      const result = await callClaude(
+        `Give me a friendly, plain-English summary of what's happening with: ${t}. 
+        Search for the latest news. What does it mean for regular investors? What should they keep in mind?
+        Keep it conversational — imagine explaining this to a smart friend over coffee.`,
+        SYSTEM
+      );
+      setText(result);
+      setSnapshots(prev => ({ ...prev, [t]: result }));
+    } catch { setText("Couldn't load data. Please try again."); }
+    setLoading(false);
+  };
+
+  useEffect(() => { fetchTopic("global markets today"); }, []);
+
+  const fetchedTopics = topics.filter(t => snapshots[t.id]);
+  const canExport = fetchedTopics.length > 0;
+
+  const handleExport = () => {
+    const date = new Date().toLocaleDateString("en-SG", { year:"numeric", month:"long", day:"numeric" });
+    const snapshotList = fetchedTopics.map(t => ({ topic: t.id, text: snapshots[t.id] }));
+    exportMarketPDF(snapshotList, date);
+  };
+
+  return (
+    <div>
+      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 16 }}>
+        Browse topics below — each one loads and gets saved so you can export them all as one PDF briefing.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+        {topics.map(t => (
+          <div key={t.id} style={{ position: "relative" }}>
+            <Chip label={t.label} active={topic === t.id} onClick={() => fetchTopic(t.id)} />
+            {snapshots[t.id] && (
+              <span style={{
+                position: "absolute", top: -4, right: -4,
+                width: 10, height: 10, borderRadius: "50%",
+                background: "#3d6b4f", border: "2px solid #f8f7f5"
+              }}/>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        background: canExport ? "#f0f7f3" : "#f9fafb",
+        border: `1.5px solid ${canExport ? "#3d6b4f" : "#e5e7eb"}`,
+        borderRadius: 10, padding: "12px 16px", marginBottom: 24,
+        transition: "all 0.3s"
+      }}>
+        <div style={{ fontSize: 13, color: canExport ? "#3d6b4f" : "#9ca3af" }}>
+          {canExport
+            ? `${fetchedTopics.length} topic${fetchedTopics.length !== 1 ? "s" : ""} ready — export as a styled PDF briefing`
+            : "Load at least one topic, then export as a PDF"}
+        </div>
+        <button
+          onClick={handleExport}
+          disabled={!canExport}
+          style={{
+            background: canExport ? "#3d6b4f" : "#e5e7eb",
+            color: canExport ? "#fff" : "#9ca3af",
+            border: "none", borderRadius: 8,
+            padding: "9px 20px", fontSize: 13, fontWeight: 600,
+            cursor: canExport ? "pointer" : "not-allowed",
+            fontFamily: "'DM Sans', sans-serif", whiteSpace: "nowrap",
+            display: "flex", alignItems: "center", gap: 7,
+            transition: "all 0.2s", flexShrink: 0, marginLeft: 12
+          }}
+        >
+          🖨️ Export PDF
+        </button>
+      </div>
+
+      <div style={{ background: "#fafafa", borderRadius: 12, padding: 24, border: "1px solid #f0f0f0" }}>
+        <ResultBox text={text} loading={loading} placeholder="Pick a topic above to get started." />
+      </div>
+    </div>
+  );
+}
+
+// ─── TAB 2: NEWS BY INDUSTRY ─────────────────────────────────────────────────
+function NewsByIndustryTab() {
+  const [active, setActive] = useState(null);
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const fetch = async (industry) => {
+    setActive(industry.id); setLoading(true); setText("");
+    try {
+      const result = await callClaude(
+        `Search for the latest news in the ${industry.label} sector (past week or two).
+        Then write a summary that:
+        1. Highlights the 4-6 biggest stories in plain language
+        2. For each story, explains in 1-2 sentences WHY it matters to someone who has investments in this sector
+        3. Ends with a "What to watch" section — 2-3 things investors should keep an eye on
+        
+        Write it like you're briefing a smart client who doesn't want jargon — just the stuff that matters.`,
+        SYSTEM
+      );
+      setText(result);
+    } catch { setText("Couldn't load data. Try again."); }
+    setLoading(false);
+  };
+
+  return (
+    <div>
+      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 20 }}>
+        Pick an industry to see what's been happening and why it matters to your clients' portfolios.
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 28 }}>
+        {INDUSTRIES.map(ind => (
+          <button key={ind.id} onClick={() => fetch(ind)} style={{
+            background: active === ind.id ? ind.color : "#fff",
+            border: `1.5px solid ${active === ind.id ? ind.color : "#e5e7eb"}`,
+            borderRadius: 10, padding: "14px 8px", cursor: "pointer",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
+            transition: "all 0.15s", boxShadow: active === ind.id ? `0 4px 14px ${ind.color}33` : "none"
+          }}>
+            <span style={{ fontSize: 22 }}>{ind.emoji}</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: active === ind.id ? "#fff" : "#374151", textAlign: "center", lineHeight: 1.3, fontFamily: "'DM Sans', sans-serif" }}>{ind.label}</span>
+          </button>
+        ))}
+      </div>
+      {(text || loading) && (
+        <div style={{ background: "#fafafa", borderRadius: 12, padding: 24, border: "1px solid #f0f0f0" }}>
+          {active && !loading && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+              <span style={{ fontSize: 20 }}>{INDUSTRIES.find(i=>i.id===active)?.emoji}</span>
+              <span style={{ fontWeight: 700, fontSize: 16, color: "#111" }}>{INDUSTRIES.find(i=>i.id===active)?.label} — Latest News</span>
+            </div>
+          )}
+          <ResultBox text={text} loading={loading} placeholder="" />
+        </div>
+      )}
+      {!text && !loading && (
+        <div style={{ textAlign: "center", padding: "40px 0", color: "#d1d5db" }}>
+          <div style={{ fontSize: 40, marginBottom: 8 }}>👆</div>
+          <div style={{ fontSize: 14 }}>Choose an industry above</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── TAB 3: LOOK UP ANYTHING ─────────────────────────────────────────────────
+function LookUpTab() {
+  const [query, setQuery] = useState("");
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [assetType, setAssetType] = useState("stock");
+  const [active, setActive] = useState(null);
+
+  const assetTypes = [
+    { id: "stock", label: "Stocks", placeholder: "e.g. Apple, AAPL, Tesla" },
+    { id: "etf", label: "ETFs", placeholder: "e.g. VOO, QQQ, IWDA" },
+    { id: "sg_etf", label: "SG ETFs", placeholder: "e.g. ES3, G3B, CLR" },
+    { id: "unit_trust", label: "Unit Trusts (SG)", placeholder: "e.g. Nikko AM STI, Lion-OCBC Securities" },
+  ];
+
+  const presets = {
+    stock: ["Apple (AAPL)", "NVIDIA", "DBS Bank", "Sea Limited", "Grab"],
+    etf: ["VOO (S&P 500)", "QQQ (Nasdaq)", "IWDA (World)", "VT (Total World)"],
+    sg_etf: ["ES3 (STI ETF)", "G3B (Nikko STI)", "CLR (Lion-Phillip S-REIT)", "MAS Bills (T-bills)"],
+    unit_trust: ["Nikko AM Singapore STI", "PIMCO Income Fund", "Fullerton SGD Cash Fund", "Infinity Global Stock Index"],
+  };
+
+  const lookup = async (q) => {
+    if (!q.trim()) return;
+    setActive(q); setLoading(true); setText("");
+    try {
+      const typeLabel = assetTypes.find(a => a.id === assetType)?.label;
+      const result = await callClaude(
+        `Look up this ${typeLabel}: "${q}".
+        Search for the latest info and give me:
+        - What it is / what it holds (in plain English, 2-3 sentences)
+        - How it's performed recently (last week, month, year if available)
+        - Any recent news or developments worth knowing
+        - A simple honest take: what kind of investor is this suited for?
+        - Any risks to be aware of right now
+        
+        Keep it friendly and jargon-free. If it's a Singapore product, mention SGD returns and local context.`,
+        SYSTEM
+      );
+      setText(result);
+    } catch { setText("Couldn't load that. Try again."); }
+    setLoading(false);
+  };
+
+  const current = assetTypes.find(a => a.id === assetType);
+
+  return (
+    <div>
+      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 16 }}>
+        Look up any stock, ETF, or Singapore unit trust in plain English.
+      </p>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        {assetTypes.map(a => <Chip key={a.id} label={a.label} active={assetType === a.id} onClick={() => { setAssetType(a.id); setText(""); setActive(null); }} />)}
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+        <input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && lookup(query)}
+          placeholder={current?.placeholder}
+          style={{
+            flex: 1, border: "1.5px solid #e5e7eb", borderRadius: 10,
+            padding: "11px 16px", fontSize: 14, outline: "none", color: "#111",
+            fontFamily: "'DM Sans', sans-serif",
+            transition: "border-color 0.15s"
+          }}
+        />
+        <button onClick={() => lookup(query)} style={{
+          background: "#6366f1", color: "#fff", border: "none", borderRadius: 10,
+          padding: "11px 22px", fontSize: 14, fontWeight: 600, cursor: "pointer",
+          fontFamily: "'DM Sans', sans-serif"
+        }}>Search</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
+        <span style={{ fontSize: 12, color: "#9ca3af", alignSelf: "center" }}>Try:</span>
+        {(presets[assetType] || []).map(p => (
+          <button key={p} onClick={() => { setQuery(p); lookup(p); }} style={{
+            background: active === p ? "#ede9fe" : "#f9fafb",
+            color: active === p ? "#6366f1" : "#6b7280",
+            border: `1px solid ${active === p ? "#c4b5fd" : "#e5e7eb"}`,
+            borderRadius: 8, padding: "5px 12px", fontSize: 12,
+            cursor: "pointer", fontFamily: "'DM Sans', sans-serif"
+          }}>{p}</button>
+        ))}
+      </div>
+
+      <div style={{ background: "#fafafa", borderRadius: 12, padding: 24, border: "1px solid #f0f0f0", minHeight: 120 }}>
+        <ResultBox text={text} loading={loading} placeholder="Search for something above to get started." />
+      </div>
+    </div>
+  );
+}
+
+// ─── TAB 4: QUICK SCAN ───────────────────────────────────────────────────────
+function QuickScanTab() {
+  const [items, setItems] = useState("AAPL, MSFT, ES3.SI");
+  const [text, setText] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [scanType, setScanType] = useState("overview");
+
+  const scanTypes = [
+    { id: "overview", label: "Quick overview" },
+    { id: "performance", label: "Recent performance" },
+    { id: "news", label: "Latest news" },
+    { id: "risk", label: "Risk check" },
+  ];
+
+  const scan = async () => {
+    if (!items.trim()) return;
+    setLoading(true); setText("");
+    try {
+      const result = await callClaude(
+        `Do a "${scanType}" scan on these investments: ${items}.
+        Search for current info on each one.
+        For each item, give a short 3-5 sentence summary based on the scan type.
+        Use plain language. Group each investment clearly with its name as a header.
+        If any of these are Singapore-listed (like .SI tickers or STI ETFs), note that context.`,
+        SYSTEM
+      );
+      setText(result);
+    } catch { setText("Couldn't run the scan. Try again."); }
+    setLoading(false);
+  };
+
+  return (
+    <div>
+      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 20 }}>
+        Paste in a list of stocks, ETFs, or unit trusts — get a quick read on all of them at once.
+      </p>
+
+      <div style={{ marginBottom: 16 }}>
+        <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>Your watchlist</label>
+        <textarea
+          value={items}
+          onChange={e => setItems(e.target.value)}
+          placeholder="e.g. AAPL, NVDA, ES3.SI, VOO, Nikko AM STI..."
+          style={{
+            width: "100%", border: "1.5px solid #e5e7eb", borderRadius: 10,
+            padding: "11px 16px", fontSize: 14, outline: "none", color: "#111",
+            fontFamily: "'DM Sans', sans-serif", resize: "vertical", minHeight: 80
+          }}
+        />
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        {scanTypes.map(s => <Chip key={s.id} label={s.label} active={scanType === s.id} onClick={() => setScanType(s.id)} />)}
+      </div>
+
+      <button onClick={scan} style={{
+        background: loading ? "#e5e7eb" : "#6366f1",
+        color: loading ? "#9ca3af" : "#fff",
+        border: "none", borderRadius: 10, padding: "12px 24px",
+        fontSize: 14, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer",
+        fontFamily: "'DM Sans', sans-serif", marginBottom: 24, width: "100%"
+      }}>
+        {loading ? "Scanning..." : `Run ${scanTypes.find(s=>s.id===scanType)?.label}`}
+      </button>
+
+      <div style={{ background: "#fafafa", borderRadius: 12, padding: 24, border: "1px solid #f0f0f0", minHeight: 120 }}>
+        <ResultBox text={text} loading={loading} placeholder="Add your investments above and run a scan." />
+      </div>
+    </div>
+  );
+}
+
+// ─── TAB 5: CLIENT LETTER ────────────────────────────────────────────────────
+function ClientLetterTab() {
+  const [firmName, setFirmName] = useState("");
+  const [advisorName, setAdvisorName] = useState("");
+  const [clientName, setClientName] = useState("");
+  const [month, setMonth] = useState(() => { const d = new Date(); return `${d.toLocaleString("default",{month:"long"})} ${d.getFullYear()}`; });
+  const [focus, setFocus] = useState("");
+  const [notes, setNotes] = useState("");
+  const [tone, setTone] = useState("warm");
+  const [preview, setPreview] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const tones = [
+    { id: "warm", label: "Warm & reassuring" },
+    { id: "balanced", label: "Balanced & informative" },
+    { id: "concise", label: "Short & to the point" },
+  ];
+
+  const toneDescriptions = {
+    warm: "empathetic, reassuring, like a trusted advisor checking in",
+    balanced: "professional but approachable, balanced between data and narrative",
+    concise: "brief and clear, bullet-heavy, respects the client's time"
+  };
+
+  const generate = async () => {
+    setLoading(true); setPreview("");
+    try {
+      const result = await callClaude(
+        `Write a monthly investment update letter for ${month}.
+        ${firmName ? `Firm: ${firmName}.` : ""} 
+        ${advisorName ? `Advisor: ${advisorName}.` : ""}
+        Client: ${clientName || "Valued Client"}.
+        Portfolio focus: ${focus || "diversified portfolio of equities and bonds"}.
+        ${notes ? `Special context: ${notes}` : ""}
+        
+        Tone: ${toneDescriptions[tone]}.
+        
+        Search the web for current market conditions for ${month} and write about what actually happened.
+        
+        Structure:
+        1. A warm personal opening (1 short paragraph)
+        2. What happened in markets this month — in plain English, no jargon (2-3 paragraphs)
+        3. News highlights that affect their portfolio — grouped by relevant industries/themes
+        4. What we're thinking about going forward (1-2 paragraphs, honest and grounded)
+        5. A brief action note — anything the client should know or ask about
+        6. Warm closing sign-off
+        
+        Write it like a real human advisor, not a corporate newsletter. Avoid clichés like "in these uncertain times".
+        About 450-600 words.`,
+        `You are a warm, thoughtful financial advisor writing a personal letter to a client. 
+        Write in first person. Be honest, clear, and human. No jargon. No corporate-speak.
+        Search the web for actual market data for this month before writing.`
+      );
+      setPreview(result);
+    } catch { setPreview("Couldn't generate the letter. Please try again."); }
+    setLoading(false);
+  };
+
+  const exportDoc = () => {
+    const now = new Date().toLocaleDateString("en-SG", { year:"numeric", month:"long", day:"numeric" });
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<style>
+body { font-family: Georgia, serif; font-size: 12pt; margin: 1.2in 1in; color: #1a1a1a; line-height: 1.7; }
+.firm { font-size: 18pt; font-weight: bold; color: #2c3e50; margin-bottom: 2px; }
+.meta { font-size: 10pt; color: #888; margin-bottom: 30px; }
+hr { border: none; border-top: 1px solid #ddd; margin: 20px 0; }
+h2 { font-size: 12pt; font-weight: bold; color: #2c3e50; margin: 20px 0 8px; }
+p { margin: 0 0 12px; }
+.footer { margin-top: 40px; font-size: 9pt; color: #aaa; border-top: 1px solid #eee; padding-top: 10px; }
+</style></head><body>
+${firmName ? `<div class="firm">${firmName}</div>` : ""}
+<div class="meta">${advisorName ? `${advisorName} &nbsp;|&nbsp; ` : ""}${month} &nbsp;|&nbsp; ${now}</div>
+<hr>
+<p><strong>Dear ${clientName || "Valued Client"},</strong></p>
+${preview.split("\n").filter(l=>l.trim()).map(l => {
+  if (l.startsWith("## ") || l.startsWith("### ")) return `<h2>${l.replace(/^#+\s*/,"")}</h2>`;
+  if (l.startsWith("- ") || l.startsWith("• ")) return `<p style="margin-left:20px">• ${l.replace(/^[-•]\s*/,"")}</p>`;
+  return `<p>${l}</p>`;
+}).join("\n")}
+<div class="footer">This letter is prepared by ${advisorName||"your advisor"} for informational purposes only and does not constitute financial advice. Please speak with your advisor before making any investment decisions.</div>
+</body></html>`;
+
+    const blob = new Blob([html], { type: "application/msword" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Investment-Update-${month.replace(/\s/g,"-")}.doc`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const inputStyle = {
+    width: "100%", border: "1.5px solid #e5e7eb", borderRadius: 10,
+    padding: "10px 14px", fontSize: 14, outline: "none", color: "#111",
+    fontFamily: "'DM Sans', sans-serif", background: "#fff"
+  };
+
+  return (
+    <div>
+      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 20 }}>
+        Fill in a few details and get a personalised monthly letter ready to send to your client.
+      </p>
+
+      <div style={{ background: "#fafafa", borderRadius: 12, padding: 24, border: "1px solid #f0f0f0", marginBottom: 24 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Your firm name</label>
+            <input value={firmName} onChange={e=>setFirmName(e.target.value)} placeholder="e.g. Meridian Wealth" style={inputStyle}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Your name</label>
+            <input value={advisorName} onChange={e=>setAdvisorName(e.target.value)} placeholder="e.g. Sarah Lim, CFP" style={inputStyle}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Client name</label>
+            <input value={clientName} onChange={e=>setClientName(e.target.value)} placeholder="e.g. Mr and Mrs Tan" style={inputStyle}/>
+          </div>
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Month</label>
+            <input value={month} onChange={e=>setMonth(e.target.value)} style={inputStyle}/>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Portfolio focus</label>
+          <input value={focus} onChange={e=>setFocus(e.target.value)} placeholder="e.g. 60/40 equities and bonds, some Singapore REITs, long-term growth" style={inputStyle}/>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Anything specific to mention? <span style={{fontWeight:400}}>(optional)</span></label>
+          <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="e.g. Client is nervous about rate cuts, recently added to REITs, planning retirement in 3 years..." style={{ ...inputStyle, minHeight: 70, resize: "vertical" }}/>
+        </div>
+
+        <div style={{ marginBottom: 20 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 8 }}>Letter tone</label>
+          <div style={{ display: "flex", gap: 8 }}>
+            {tones.map(t => <Chip key={t.id} label={t.label} active={tone===t.id} onClick={() => setTone(t.id)} />)}
+          </div>
+        </div>
+
+        <button onClick={generate} disabled={loading} style={{
+          background: loading ? "#e5e7eb" : "#6366f1",
+          color: loading ? "#9ca3af" : "#fff",
+          border: "none", borderRadius: 10, padding: "13px 0",
+          fontSize: 14, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer",
+          fontFamily: "'DM Sans', sans-serif", width: "100%"
+        }}>
+          {loading ? "Writing your letter..." : "Generate letter"}
+        </button>
+      </div>
+
+      {(preview || loading) && (
+        <div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Preview</span>
+            {preview && !loading && (
+              <button onClick={exportDoc} style={{
+                background: "#fff", color: "#6366f1", border: "1.5px solid #6366f1",
+                borderRadius: 8, padding: "7px 16px", fontSize: 13,
+                fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif"
+              }}>⬇ Download as Word</button>
+            )}
+          </div>
+
+          {/* Letter preview — looks like paper */}
+          <div style={{ background: "#fff", borderRadius: 12, padding: "40px 48px", border: "1px solid #e5e7eb", boxShadow: "0 4px 24px rgba(0,0,0,0.06)", fontFamily: "Georgia, serif" }}>
+            {firmName && <div style={{ fontSize: 18, fontWeight: 700, color: "#2c3e50", marginBottom: 2 }}>{firmName}</div>}
+            {advisorName && <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 24 }}>{advisorName} · {month}</div>}
+            <div style={{ borderTop: "1px solid #e5e7eb", marginBottom: 20 }}/>
+            {loading ? <Spinner color="#6366f1" /> : (
+              <div style={{ fontSize: 14, lineHeight: 1.85, color: "#374151" }}>
+                <ResultBox text={preview} loading={false} placeholder="" />
+              </div>
+            )}
+            {preview && !loading && (
+              <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid #f0f0f0", fontSize: 11, color: "#d1d5db" }}>
+                For informational purposes only. Not financial advice. Please consult your advisor.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── MAIN APP ────────────────────────────────────────────────────────────────
+export default function App() {
+  const [activeTab, setActiveTab] = useState(0);
+
+  return (
+    <div style={{ background: "#f8f7f5", minHeight: "100vh", fontFamily: "'DM Sans', sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap');
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+        * { box-sizing: border-box; }
+        input:focus, textarea:focus { border-color: #6366f1 !important; }
+        button { transition: all 0.15s; }
+      `}</style>
+
+      {/* Header */}
+      <div style={{ background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "18px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div>
+          <div style={{ fontSize: 20, fontFamily: "'DM Serif Display', serif", color: "#111827", letterSpacing: "-0.3px" }}>
+            Clearview <span style={{ color: "#6366f1" }}>Insights</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>Your markets, in plain English</div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981" }}/>
+          <span style={{ fontSize: 12, color: "#6b7280" }}>Live data</span>
+        </div>
+      </div>
+
+      {/* Tab bar */}
+      <div style={{ background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "0 32px", display: "flex", gap: 0, overflowX: "auto" }}>
+        {TABS.map((tab, i) => (
+          <button key={tab.id} onClick={() => setActiveTab(i)} style={{
+            background: "transparent", border: "none",
+            borderBottom: `2px solid ${activeTab === i ? "#6366f1" : "transparent"}`,
+            color: activeTab === i ? "#6366f1" : "#6b7280",
+            padding: "14px 16px", fontSize: 13,
+            fontFamily: "'DM Sans', sans-serif", fontWeight: activeTab === i ? 600 : 400,
+            cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6
+          }}>
+            <span>{tab.emoji}</span> {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content */}
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "32px 24px", animation: "fadeIn 0.25s ease" }}>
+        {activeTab === 0 && <WhatsHappeningTab />}
+        {activeTab === 1 && <NewsByIndustryTab />}
+        {activeTab === 2 && <LookUpTab />}
+        {activeTab === 3 && <QuickScanTab />}
+        {activeTab === 4 && <ClientLetterTab />}
+      </div>
+
+      <div style={{ textAlign: "center", padding: "20px 0 32px", fontSize: 11, color: "#d1d5db" }}>
+        For informational purposes only · Not financial advice · Clearview Insights
+      </div>
+    </div>
+  );
+}
