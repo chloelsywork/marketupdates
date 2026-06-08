@@ -1,4 +1,32 @@
-import { useState, useEffect } from "react";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Clearview Insights</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #f8f7f5; font-family: 'DM Sans', sans-serif; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:translateY(0); } }
+    input:focus, textarea:focus { border-color: #6366f1 !important; outline: none; }
+    button { transition: all 0.15s; font-family: 'DM Sans', sans-serif; }
+    textarea { font-family: 'DM Sans', sans-serif; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #f1f1f1; }
+    ::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
 
 // ─── FIXED API: handles tool-use agentic loop ────────────────────────────────
 async function callClaude(userMessage, systemPrompt) {
@@ -759,7 +787,7 @@ ${preview.split("\n").filter(l=>l.trim()).map(l => {
 }
 
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
-export default function App() {
+function App() {
   const [activeTab, setActiveTab] = useState(0);
 
   return (
@@ -818,3 +846,9 @@ export default function App() {
     </div>
   );
 }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
