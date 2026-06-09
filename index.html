@@ -6,7 +6,6 @@
   <title>Clearview Insights</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet">
   <style>
@@ -24,26 +23,43 @@
 </head>
 <body>
   <div id="root"></div>
-  <script type="text/babel">
-    const { useState, useEffect } = React;
-
+  <script>
+const {
+  useState,
+  useEffect
+} = React;
 
 // ─── FIXED API: handles tool-use agentic loop ────────────────────────────────
+function getApiKey() {
+  return window.__CLEARVIEW_API_KEY__ || localStorage.getItem('clearview_api_key') || '';
+}
 async function callClaude(userMessage, systemPrompt) {
-  const messages = [{ role: "user", content: userMessage }];
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('NO_API_KEY');
+  const messages = [{
+    role: "user",
+    content: userMessage
+  }];
   let finalText = "";
-
   for (let i = 0; i < 5; i++) {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
       body: JSON.stringify({
         model: "claude-sonnet-4-20250514",
         max_tokens: 1500,
-        tools: [{ type: "web_search_20250305", name: "web_search" }],
+        tools: [{
+          type: "web_search_20250305",
+          name: "web_search"
+        }],
         system: systemPrompt,
-        messages,
-      }),
+        messages
+      })
     });
     const data = await res.json();
     if (!data.content) throw new Error(data.error?.message || "API error");
@@ -51,95 +67,221 @@ async function callClaude(userMessage, systemPrompt) {
     // collect any text from this turn
     const textBlocks = data.content.filter(b => b.type === "text");
     if (textBlocks.length) finalText = textBlocks.map(b => b.text).join("");
-
     if (data.stop_reason === "end_turn") break;
-
     if (data.stop_reason === "tool_use") {
       // add assistant turn, then tool results
-      messages.push({ role: "assistant", content: data.content });
-      const toolResults = data.content
-        .filter(b => b.type === "tool_use")
-        .map(b => ({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(b.input) }));
-      messages.push({ role: "user", content: toolResults });
+      messages.push({
+        role: "assistant",
+        content: data.content
+      });
+      const toolResults = data.content.filter(b => b.type === "tool_use").map(b => ({
+        type: "tool_result",
+        tool_use_id: b.id,
+        content: JSON.stringify(b.input)
+      }));
+      messages.push({
+        role: "user",
+        content: toolResults
+      });
     } else {
       break;
     }
   }
-
   return finalText || "Couldn't fetch data right now — try again in a moment.";
 }
-
 const SYSTEM = `You are a friendly, knowledgeable investment advisor who explains things in plain, warm language — like a smart friend who happens to know a lot about markets. 
 Avoid jargon. No "alpha", "catalysts", "tailwinds" unless you explain them. Write like you're talking to a real person, not a Bloomberg terminal. 
 Use short paragraphs. Use bullet points for lists. Be honest about uncertainty. 
 Always search the web for current data before responding.`;
 
 // ─── TABS ────────────────────────────────────────────────────────────────────
-const TABS = [
-  { id: "brief",   label: "What's Happening",  emoji: "🌍" },
-  { id: "news",    label: "News by Industry",   emoji: "📰" },
-  { id: "lookup",  label: "Look Up Anything",   emoji: "🔍" },
-  { id: "signals", label: "Quick Scan",          emoji: "⚡" },
-  { id: "report",  label: "Client Letter",       emoji: "✉️" },
-];
-
-const INDUSTRIES = [
-  { id: "tech",       label: "Tech & AI",          emoji: "💻", color: "#6366f1" },
-  { id: "banking",    label: "Banking & Finance",   emoji: "🏦", color: "#0ea5e9" },
-  { id: "healthcare", label: "Healthcare",          emoji: "🏥", color: "#10b981" },
-  { id: "property",   label: "Property & REITs",    emoji: "🏠", color: "#f59e0b" },
-  { id: "energy",     label: "Energy",              emoji: "⚡", color: "#ef4444" },
-  { id: "consumer",   label: "Consumer & Retail",   emoji: "🛍️", color: "#ec4899" },
-  { id: "transport",  label: "Transport & Logistics","emoji": "✈️", color: "#8b5cf6" },
-  { id: "sgmarket",   label: "Singapore Market",    emoji: "🇸🇬", color: "#f97316" },
-];
+const TABS = [{
+  id: "brief",
+  label: "What's Happening",
+  emoji: "🌍"
+}, {
+  id: "news",
+  label: "News by Industry",
+  emoji: "📰"
+}, {
+  id: "lookup",
+  label: "Look Up Anything",
+  emoji: "🔍"
+}, {
+  id: "signals",
+  label: "Quick Scan",
+  emoji: "⚡"
+}, {
+  id: "report",
+  label: "Client Letter",
+  emoji: "✉️"
+}];
+const INDUSTRIES = [{
+  id: "tech",
+  label: "Tech & AI",
+  emoji: "💻",
+  color: "#6366f1"
+}, {
+  id: "banking",
+  label: "Banking & Finance",
+  emoji: "🏦",
+  color: "#0ea5e9"
+}, {
+  id: "healthcare",
+  label: "Healthcare",
+  emoji: "🏥",
+  color: "#10b981"
+}, {
+  id: "property",
+  label: "Property & REITs",
+  emoji: "🏠",
+  color: "#f59e0b"
+}, {
+  id: "energy",
+  label: "Energy",
+  emoji: "⚡",
+  color: "#ef4444"
+}, {
+  id: "consumer",
+  label: "Consumer & Retail",
+  emoji: "🛍️",
+  color: "#ec4899"
+}, {
+  id: "transport",
+  label: "Transport & Logistics",
+  "emoji": "✈️",
+  color: "#8b5cf6"
+}, {
+  id: "sgmarket",
+  label: "Singapore Market",
+  emoji: "🇸🇬",
+  color: "#f97316"
+}];
 
 // ─── SHARED COMPONENTS ───────────────────────────────────────────────────────
-function Spinner({ color = "#6366f1" }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#888", fontSize: 14, padding: "20px 0" }}>
-      <div style={{ width: 18, height: 18, border: `2px solid #eee`, borderTopColor: color, borderRadius: "50%", animation: "spin 0.8s linear infinite" }} />
-      Fetching the latest info...
-    </div>
-  );
+function Spinner({
+  color = "#6366f1"
+}) {
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 10,
+      color: "#888",
+      fontSize: 14,
+      padding: "20px 0"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 18,
+      height: 18,
+      border: `2px solid #eee`,
+      borderTopColor: color,
+      borderRadius: "50%",
+      animation: "spin 0.8s linear infinite"
+    }
+  }), "Fetching the latest info...");
 }
-
-function ResultBox({ text, loading, placeholder }) {
-  if (loading) return <Spinner />;
-  if (!text) return <p style={{ color: "#bbb", fontSize: 14 }}>{placeholder}</p>;
-  return (
-    <div style={{ fontSize: 14, lineHeight: 1.85, color: "#374151", whiteSpace: "pre-wrap" }}>
-      {text.split("\n").map((line, i) => {
-        if (!line.trim()) return <div key={i} style={{ height: 8 }} />;
-        if (line.startsWith("## ") || line.startsWith("### ")) {
-          return <div key={i} style={{ fontWeight: 700, fontSize: 15, color: "#111827", marginTop: 18, marginBottom: 6 }}>{line.replace(/^#+\s*/, "")}</div>;
+function ResultBox({
+  text,
+  loading,
+  placeholder
+}) {
+  if (loading) return /*#__PURE__*/React.createElement(Spinner, null);
+  if (!text) return /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: "#bbb",
+      fontSize: 14
+    }
+  }, placeholder);
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      lineHeight: 1.85,
+      color: "#374151",
+      whiteSpace: "pre-wrap"
+    }
+  }, text.split("\n").map((line, i) => {
+    if (!line.trim()) return /*#__PURE__*/React.createElement("div", {
+      key: i,
+      style: {
+        height: 8
+      }
+    });
+    if (line.startsWith("## ") || line.startsWith("### ")) {
+      return /*#__PURE__*/React.createElement("div", {
+        key: i,
+        style: {
+          fontWeight: 700,
+          fontSize: 15,
+          color: "#111827",
+          marginTop: 18,
+          marginBottom: 6
         }
-        if (line.startsWith("**") && line.endsWith("**")) {
-          return <div key={i} style={{ fontWeight: 600, color: "#1f2937", marginTop: 12 }}>{line.replace(/\*\*/g, "")}</div>;
+      }, line.replace(/^#+\s*/, ""));
+    }
+    if (line.startsWith("**") && line.endsWith("**")) {
+      return /*#__PURE__*/React.createElement("div", {
+        key: i,
+        style: {
+          fontWeight: 600,
+          color: "#1f2937",
+          marginTop: 12
         }
-        if (line.startsWith("- ") || line.startsWith("• ")) {
-          return <div key={i} style={{ display: "flex", gap: 8, marginBottom: 4, paddingLeft: 4 }}><span style={{ color: "#6366f1", marginTop: 2 }}>›</span><span>{line.replace(/^[-•]\s*/, "")}</span></div>;
+      }, line.replace(/\*\*/g, ""));
+    }
+    if (line.startsWith("- ") || line.startsWith("• ")) {
+      return /*#__PURE__*/React.createElement("div", {
+        key: i,
+        style: {
+          display: "flex",
+          gap: 8,
+          marginBottom: 4,
+          paddingLeft: 4
         }
-        if (/^\d+\.\s/.test(line)) {
-          return <div key={i} style={{ marginBottom: 4, paddingLeft: 4, color: "#374151" }}>{line}</div>;
+      }, /*#__PURE__*/React.createElement("span", {
+        style: {
+          color: "#6366f1",
+          marginTop: 2
         }
-        return <div key={i}>{line}</div>;
-      })}
-    </div>
-  );
+      }, "\u203A"), /*#__PURE__*/React.createElement("span", null, line.replace(/^[-•]\s*/, "")));
+    }
+    if (/^\d+\.\s/.test(line)) {
+      return /*#__PURE__*/React.createElement("div", {
+        key: i,
+        style: {
+          marginBottom: 4,
+          paddingLeft: 4,
+          color: "#374151"
+        }
+      }, line);
+    }
+    return /*#__PURE__*/React.createElement("div", {
+      key: i
+    }, line);
+  }));
 }
-
-function Chip({ label, active, onClick, color = "#6366f1" }) {
-  return (
-    <button onClick={onClick} style={{
+function Chip({
+  label,
+  active,
+  onClick,
+  color = "#6366f1"
+}) {
+  return /*#__PURE__*/React.createElement("button", {
+    onClick: onClick,
+    style: {
       background: active ? color : "#f3f4f6",
       color: active ? "#fff" : "#6b7280",
-      border: "none", borderRadius: 20,
-      padding: "6px 14px", fontSize: 13, cursor: "pointer",
-      fontFamily: "'DM Sans', sans-serif", fontWeight: active ? 600 : 400,
+      border: "none",
+      borderRadius: 20,
+      padding: "6px 14px",
+      fontSize: 13,
+      cursor: "pointer",
+      fontFamily: "'DM Sans', sans-serif",
+      fontWeight: active ? 600 : 400,
       transition: "all 0.15s"
-    }}>{label}</button>
-  );
+    }
+  }, label);
 }
 
 // ─── PDF EXPORT ───────────────────────────────────────────────────────────────
@@ -148,14 +290,13 @@ function exportMarketPDF(snapshots, date) {
   const LIGHT_GREEN = "#8fbc8f";
   const PALE = "#e8ede9";
   const DARK = "#2c3e2d";
-
   const topicEmojis = {
     "global markets today": "🌍",
     "Singapore economy and SGX": "🇸🇬",
     "US Federal Reserve and interest rates": "📈",
     "global economy": "🏦",
     "commodities gold oil": "🛢️",
-    "cryptocurrency Bitcoin": "₿",
+    "cryptocurrency Bitcoin": "₿"
   };
   const topicTitles = {
     "global markets today": "Markets Today",
@@ -163,27 +304,25 @@ function exportMarketPDF(snapshots, date) {
     "US Federal Reserve and interest rates": "Interest Rates",
     "global economy": "Global Economy",
     "commodities gold oil": "Gold & Oil",
-    "cryptocurrency Bitcoin": "Crypto",
+    "cryptocurrency Bitcoin": "Crypto"
   };
-
   function parseLines(text) {
     const lines = text.split("\n").filter(l => l.trim());
     let html = "";
     for (const line of lines) {
       if (line.startsWith("## ") || line.startsWith("### ")) {
-        html += `<div class="section-heading">${line.replace(/^#+\s*/,"")}</div>`;
+        html += `<div class="section-heading">${line.replace(/^#+\s*/, "")}</div>`;
       } else if (line.startsWith("- ") || line.startsWith("• ")) {
-        html += `<div class="bullet"><span class="bdt">›</span><span>${line.replace(/^[-•]\s*/,"")}</span></div>`;
+        html += `<div class="bullet"><span class="bdt">›</span><span>${line.replace(/^[-•]\s*/, "")}</span></div>`;
       } else if (line.startsWith("**") && line.endsWith("**")) {
-        html += `<div class="bold-line">${line.replace(/\*\*/g,"")}</div>`;
+        html += `<div class="bold-line">${line.replace(/\*\*/g, "")}</div>`;
       } else if (line.trim()) {
         html += `<p>${line}</p>`;
       }
     }
     return html;
   }
-
-  const accentColors = ["#3d6b4f","#4a7c6f","#5a6e4a","#4e6b5a","#3b5e52","#506b42"];
+  const accentColors = ["#3d6b4f", "#4a7c6f", "#5a6e4a", "#4e6b5a", "#3b5e52", "#506b42"];
   const cardsHtml = snapshots.map((s, i) => {
     const bg = i % 2 === 0 ? "#fff" : PALE;
     const accent = accentColors[i % accentColors.length];
@@ -196,7 +335,6 @@ function exportMarketPDF(snapshots, date) {
         <div class="card-body">${parseLines(s.text)}</div>
       </div>`;
   }).join("");
-
   const html = `<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>Market Update — ${date}</title>
 <style>
@@ -239,13 +377,15 @@ body{font-family:'Source Serif 4',Georgia,serif;background:#f0f4f0;color:#2c3e2d
   <div class="eyebrow">Clearview Insights · Market Intelligence</div>
   <div class="hero-title">MARKET<span>.</span><br>UPDATE</div>
   <div class="hero-sub">Your Monthly Financial Briefing</div>
-  <div class="hero-bar"><span class="hdot"></span><span>${date}</span><span>·</span><span>${snapshots.length} Topic${snapshots.length!==1?"s":""} Covered</span><span>·</span><span>Clearview Insights</span></div>
+  <div class="hero-bar"><span class="hdot"></span><span>${date}</span><span>·</span><span>${snapshots.length} Topic${snapshots.length !== 1 ? "s" : ""} Covered</span><span>·</span><span>Clearview Insights</span></div>
 </div>
 <div class="intro">Here's your plain-English summary of what's been happening across the markets — and what it means for your money.</div>
 <div class="stat-row">
   <div class="stat-item"><div class="stat-num">${snapshots.length}</div><div class="stat-label">Topics</div></div>
   <div class="stat-item"><div class="stat-num">${new Date().getFullYear()}</div><div class="stat-label">Year</div></div>
-  <div class="stat-item"><div class="stat-num">${new Date().toLocaleString("default",{month:"short"}).toUpperCase()}</div><div class="stat-label">Month</div></div>
+  <div class="stat-item"><div class="stat-num">${new Date().toLocaleString("default", {
+    month: "short"
+  }).toUpperCase()}</div><div class="stat-label">Month</div></div>
   <div class="stat-item"><div class="stat-num">AI</div><div class="stat-label">Powered</div></div>
 </div>
 <div class="content">
@@ -257,12 +397,17 @@ body{font-family:'Source Serif 4',Georgia,serif;background:#f0f4f0;color:#2c3e2d
   <div>For informational purposes only · Not financial advice</div>
 </div>
 </body></html>`;
-
   const w = window.open("", "_blank", "width=900,height=750,scrollbars=yes");
-  if (!w) { alert("Please allow pop-ups to export the PDF, then try again."); return; }
+  if (!w) {
+    alert("Please allow pop-ups to export the PDF, then try again.");
+    return;
+  }
   w.document.write(html);
   w.document.close();
-  setTimeout(() => { w.focus(); w.print(); }, 800);
+  setTimeout(() => {
+    w.focus();
+    w.print();
+  }, 800);
 }
 
 // ─── TAB 1: WHAT'S HAPPENING ─────────────────────────────────────────────────
@@ -270,102 +415,151 @@ function WhatsHappeningTab() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [topic, setTopic] = useState("global markets today");
-  const [snapshots, setSnapshots] = useState({});   // topic → text cache
+  const [snapshots, setSnapshots] = useState({}); // topic → text cache
   const [exporting, setExporting] = useState(false);
-
-  const topics = [
-    { id: "global markets today", label: "Markets today" },
-    { id: "Singapore economy and SGX", label: "Singapore" },
-    { id: "US Federal Reserve and interest rates", label: "Interest rates" },
-    { id: "global economy", label: "Global economy" },
-    { id: "commodities gold oil", label: "Gold & Oil" },
-    { id: "cryptocurrency Bitcoin", label: "Crypto" },
-  ];
-
-  const fetchTopic = async (t) => {
+  const topics = [{
+    id: "global markets today",
+    label: "Markets today"
+  }, {
+    id: "Singapore economy and SGX",
+    label: "Singapore"
+  }, {
+    id: "US Federal Reserve and interest rates",
+    label: "Interest rates"
+  }, {
+    id: "global economy",
+    label: "Global economy"
+  }, {
+    id: "commodities gold oil",
+    label: "Gold & Oil"
+  }, {
+    id: "cryptocurrency Bitcoin",
+    label: "Crypto"
+  }];
+  const fetchTopic = async t => {
     // use cache if available
-    if (snapshots[t]) { setText(snapshots[t]); setTopic(t); return; }
-    setLoading(true); setText(""); setTopic(t);
+    if (snapshots[t]) {
+      setText(snapshots[t]);
+      setTopic(t);
+      return;
+    }
+    setLoading(true);
+    setText("");
+    setTopic(t);
     try {
-      const result = await callClaude(
-        `Give me a friendly, plain-English summary of what's happening with: ${t}. 
+      const result = await callClaude(`Give me a friendly, plain-English summary of what's happening with: ${t}. 
         Search for the latest news. What does it mean for regular investors? What should they keep in mind?
-        Keep it conversational — imagine explaining this to a smart friend over coffee.`,
-        SYSTEM
-      );
+        Keep it conversational — imagine explaining this to a smart friend over coffee.`, SYSTEM);
       setText(result);
-      setSnapshots(prev => ({ ...prev, [t]: result }));
-    } catch { setText("Couldn't load data. Please try again."); }
+      setSnapshots(prev => ({
+        ...prev,
+        [t]: result
+      }));
+    } catch {
+      setText("Couldn't load data. Please try again.");
+    }
     setLoading(false);
   };
-
-  useEffect(() => { fetchTopic("global markets today"); }, []);
-
+  useEffect(() => {
+    fetchTopic("global markets today");
+  }, []);
   const fetchedTopics = topics.filter(t => snapshots[t.id]);
   const canExport = fetchedTopics.length > 0;
-
   const handleExport = () => {
-    const date = new Date().toLocaleDateString("en-SG", { year:"numeric", month:"long", day:"numeric" });
-    const snapshotList = fetchedTopics.map(t => ({ topic: t.id, text: snapshots[t.id] }));
+    const date = new Date().toLocaleDateString("en-SG", {
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
+    const snapshotList = fetchedTopics.map(t => ({
+      topic: t.id,
+      text: snapshots[t.id]
+    }));
     exportMarketPDF(snapshotList, date);
   };
-
-  return (
-    <div>
-      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 16 }}>
-        Browse topics below — each one loads and gets saved so you can export them all as one PDF briefing.
-      </p>
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-        {topics.map(t => (
-          <div key={t.id} style={{ position: "relative" }}>
-            <Chip label={t.label} active={topic === t.id} onClick={() => fetchTopic(t.id)} />
-            {snapshots[t.id] && (
-              <span style={{
-                position: "absolute", top: -4, right: -4,
-                width: 10, height: 10, borderRadius: "50%",
-                background: "#3d6b4f", border: "2px solid #f8f7f5"
-              }}/>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <div style={{
-        display: "flex", alignItems: "center", justifyContent: "space-between",
-        background: canExport ? "#f0f7f3" : "#f9fafb",
-        border: `1.5px solid ${canExport ? "#3d6b4f" : "#e5e7eb"}`,
-        borderRadius: 10, padding: "12px 16px", marginBottom: 24,
-        transition: "all 0.3s"
-      }}>
-        <div style={{ fontSize: 13, color: canExport ? "#3d6b4f" : "#9ca3af" }}>
-          {canExport
-            ? `${fetchedTopics.length} topic${fetchedTopics.length !== 1 ? "s" : ""} ready — export as a styled PDF briefing`
-            : "Load at least one topic, then export as a PDF"}
-        </div>
-        <button
-          onClick={handleExport}
-          disabled={!canExport}
-          style={{
-            background: canExport ? "#3d6b4f" : "#e5e7eb",
-            color: canExport ? "#fff" : "#9ca3af",
-            border: "none", borderRadius: 8,
-            padding: "9px 20px", fontSize: 13, fontWeight: 600,
-            cursor: canExport ? "pointer" : "not-allowed",
-            fontFamily: "'DM Sans', sans-serif", whiteSpace: "nowrap",
-            display: "flex", alignItems: "center", gap: 7,
-            transition: "all 0.2s", flexShrink: 0, marginLeft: 12
-          }}
-        >
-          🖨️ Export PDF
-        </button>
-      </div>
-
-      <div style={{ background: "#fafafa", borderRadius: 12, padding: 24, border: "1px solid #f0f0f0" }}>
-        <ResultBox text={text} loading={loading} placeholder="Pick a topic above to get started." />
-      </div>
-    </div>
-  );
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: "#6b7280",
+      fontSize: 14,
+      marginBottom: 16
+    }
+  }, "Browse topics below \u2014 each one loads and gets saved so you can export them all as one PDF briefing."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap",
+      marginBottom: 16
+    }
+  }, topics.map(t => /*#__PURE__*/React.createElement("div", {
+    key: t.id,
+    style: {
+      position: "relative"
+    }
+  }, /*#__PURE__*/React.createElement(Chip, {
+    label: t.label,
+    active: topic === t.id,
+    onClick: () => fetchTopic(t.id)
+  }), snapshots[t.id] && /*#__PURE__*/React.createElement("span", {
+    style: {
+      position: "absolute",
+      top: -4,
+      right: -4,
+      width: 10,
+      height: 10,
+      borderRadius: "50%",
+      background: "#3d6b4f",
+      border: "2px solid #f8f7f5"
+    }
+  })))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      background: canExport ? "#f0f7f3" : "#f9fafb",
+      border: `1.5px solid ${canExport ? "#3d6b4f" : "#e5e7eb"}`,
+      borderRadius: 10,
+      padding: "12px 16px",
+      marginBottom: 24,
+      transition: "all 0.3s"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 13,
+      color: canExport ? "#3d6b4f" : "#9ca3af"
+    }
+  }, canExport ? `${fetchedTopics.length} topic${fetchedTopics.length !== 1 ? "s" : ""} ready — export as a styled PDF briefing` : "Load at least one topic, then export as a PDF"), /*#__PURE__*/React.createElement("button", {
+    onClick: handleExport,
+    disabled: !canExport,
+    style: {
+      background: canExport ? "#3d6b4f" : "#e5e7eb",
+      color: canExport ? "#fff" : "#9ca3af",
+      border: "none",
+      borderRadius: 8,
+      padding: "9px 20px",
+      fontSize: 13,
+      fontWeight: 600,
+      cursor: canExport ? "pointer" : "not-allowed",
+      fontFamily: "'DM Sans', sans-serif",
+      whiteSpace: "nowrap",
+      display: "flex",
+      alignItems: "center",
+      gap: 7,
+      transition: "all 0.2s",
+      flexShrink: 0,
+      marginLeft: 12
+    }
+  }, "\uD83D\uDDA8\uFE0F Export PDF")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#fafafa",
+      borderRadius: 12,
+      padding: 24,
+      border: "1px solid #f0f0f0"
+    }
+  }, /*#__PURE__*/React.createElement(ResultBox, {
+    text: text,
+    loading: loading,
+    placeholder: "Pick a topic above to get started."
+  })));
 }
 
 // ─── TAB 2: NEWS BY INDUSTRY ─────────────────────────────────────────────────
@@ -373,63 +567,110 @@ function NewsByIndustryTab() {
   const [active, setActive] = useState(null);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
-
-  const fetch = async (industry) => {
-    setActive(industry.id); setLoading(true); setText("");
+  const fetch = async industry => {
+    setActive(industry.id);
+    setLoading(true);
+    setText("");
     try {
-      const result = await callClaude(
-        `Search for the latest news in the ${industry.label} sector (past week or two).
+      const result = await callClaude(`Search for the latest news in the ${industry.label} sector (past week or two).
         Then write a summary that:
         1. Highlights the 4-6 biggest stories in plain language
         2. For each story, explains in 1-2 sentences WHY it matters to someone who has investments in this sector
         3. Ends with a "What to watch" section — 2-3 things investors should keep an eye on
         
-        Write it like you're briefing a smart client who doesn't want jargon — just the stuff that matters.`,
-        SYSTEM
-      );
+        Write it like you're briefing a smart client who doesn't want jargon — just the stuff that matters.`, SYSTEM);
       setText(result);
-    } catch { setText("Couldn't load data. Try again."); }
+    } catch {
+      setText("Couldn't load data. Try again.");
+    }
     setLoading(false);
   };
-
-  return (
-    <div>
-      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 20 }}>
-        Pick an industry to see what's been happening and why it matters to your clients' portfolios.
-      </p>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginBottom: 28 }}>
-        {INDUSTRIES.map(ind => (
-          <button key={ind.id} onClick={() => fetch(ind)} style={{
-            background: active === ind.id ? ind.color : "#fff",
-            border: `1.5px solid ${active === ind.id ? ind.color : "#e5e7eb"}`,
-            borderRadius: 10, padding: "14px 8px", cursor: "pointer",
-            display: "flex", flexDirection: "column", alignItems: "center", gap: 6,
-            transition: "all 0.15s", boxShadow: active === ind.id ? `0 4px 14px ${ind.color}33` : "none"
-          }}>
-            <span style={{ fontSize: 22 }}>{ind.emoji}</span>
-            <span style={{ fontSize: 11, fontWeight: 600, color: active === ind.id ? "#fff" : "#374151", textAlign: "center", lineHeight: 1.3, fontFamily: "'DM Sans', sans-serif" }}>{ind.label}</span>
-          </button>
-        ))}
-      </div>
-      {(text || loading) && (
-        <div style={{ background: "#fafafa", borderRadius: 12, padding: 24, border: "1px solid #f0f0f0" }}>
-          {active && !loading && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-              <span style={{ fontSize: 20 }}>{INDUSTRIES.find(i=>i.id===active)?.emoji}</span>
-              <span style={{ fontWeight: 700, fontSize: 16, color: "#111" }}>{INDUSTRIES.find(i=>i.id===active)?.label} — Latest News</span>
-            </div>
-          )}
-          <ResultBox text={text} loading={loading} placeholder="" />
-        </div>
-      )}
-      {!text && !loading && (
-        <div style={{ textAlign: "center", padding: "40px 0", color: "#d1d5db" }}>
-          <div style={{ fontSize: 40, marginBottom: 8 }}>👆</div>
-          <div style={{ fontSize: 14 }}>Choose an industry above</div>
-        </div>
-      )}
-    </div>
-  );
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: "#6b7280",
+      fontSize: 14,
+      marginBottom: 20
+    }
+  }, "Pick an industry to see what's been happening and why it matters to your clients' portfolios."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "repeat(4, 1fr)",
+      gap: 10,
+      marginBottom: 28
+    }
+  }, INDUSTRIES.map(ind => /*#__PURE__*/React.createElement("button", {
+    key: ind.id,
+    onClick: () => fetch(ind),
+    style: {
+      background: active === ind.id ? ind.color : "#fff",
+      border: `1.5px solid ${active === ind.id ? ind.color : "#e5e7eb"}`,
+      borderRadius: 10,
+      padding: "14px 8px",
+      cursor: "pointer",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: 6,
+      transition: "all 0.15s",
+      boxShadow: active === ind.id ? `0 4px 14px ${ind.color}33` : "none"
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 22
+    }
+  }, ind.emoji), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 11,
+      fontWeight: 600,
+      color: active === ind.id ? "#fff" : "#374151",
+      textAlign: "center",
+      lineHeight: 1.3,
+      fontFamily: "'DM Sans', sans-serif"
+    }
+  }, ind.label)))), (text || loading) && /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#fafafa",
+      borderRadius: 12,
+      padding: 24,
+      border: "1px solid #f0f0f0"
+    }
+  }, active && !loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 20
+    }
+  }, INDUSTRIES.find(i => i.id === active)?.emoji), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 700,
+      fontSize: 16,
+      color: "#111"
+    }
+  }, INDUSTRIES.find(i => i.id === active)?.label, " \u2014 Latest News")), /*#__PURE__*/React.createElement(ResultBox, {
+    text: text,
+    loading: loading,
+    placeholder: ""
+  })), !text && !loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: "40px 0",
+      color: "#d1d5db"
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 40,
+      marginBottom: 8
+    }
+  }, "\uD83D\uDC46"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14
+    }
+  }, "Choose an industry above")));
 }
 
 // ─── TAB 3: LOOK UP ANYTHING ─────────────────────────────────────────────────
@@ -439,28 +680,37 @@ function LookUpTab() {
   const [loading, setLoading] = useState(false);
   const [assetType, setAssetType] = useState("stock");
   const [active, setActive] = useState(null);
-
-  const assetTypes = [
-    { id: "stock", label: "Stocks", placeholder: "e.g. Apple, AAPL, Tesla" },
-    { id: "etf", label: "ETFs", placeholder: "e.g. VOO, QQQ, IWDA" },
-    { id: "sg_etf", label: "SG ETFs", placeholder: "e.g. ES3, G3B, CLR" },
-    { id: "unit_trust", label: "Unit Trusts (SG)", placeholder: "e.g. Nikko AM STI, Lion-OCBC Securities" },
-  ];
-
+  const assetTypes = [{
+    id: "stock",
+    label: "Stocks",
+    placeholder: "e.g. Apple, AAPL, Tesla"
+  }, {
+    id: "etf",
+    label: "ETFs",
+    placeholder: "e.g. VOO, QQQ, IWDA"
+  }, {
+    id: "sg_etf",
+    label: "SG ETFs",
+    placeholder: "e.g. ES3, G3B, CLR"
+  }, {
+    id: "unit_trust",
+    label: "Unit Trusts (SG)",
+    placeholder: "e.g. Nikko AM STI, Lion-OCBC Securities"
+  }];
   const presets = {
     stock: ["Apple (AAPL)", "NVIDIA", "DBS Bank", "Sea Limited", "Grab"],
     etf: ["VOO (S&P 500)", "QQQ (Nasdaq)", "IWDA (World)", "VT (Total World)"],
     sg_etf: ["ES3 (STI ETF)", "G3B (Nikko STI)", "CLR (Lion-Phillip S-REIT)", "MAS Bills (T-bills)"],
-    unit_trust: ["Nikko AM Singapore STI", "PIMCO Income Fund", "Fullerton SGD Cash Fund", "Infinity Global Stock Index"],
+    unit_trust: ["Nikko AM Singapore STI", "PIMCO Income Fund", "Fullerton SGD Cash Fund", "Infinity Global Stock Index"]
   };
-
-  const lookup = async (q) => {
+  const lookup = async q => {
     if (!q.trim()) return;
-    setActive(q); setLoading(true); setText("");
+    setActive(q);
+    setLoading(true);
+    setText("");
     try {
       const typeLabel = assetTypes.find(a => a.id === assetType)?.label;
-      const result = await callClaude(
-        `Look up this ${typeLabel}: "${q}".
+      const result = await callClaude(`Look up this ${typeLabel}: "${q}".
         Search for the latest info and give me:
         - What it is / what it holds (in plain English, 2-3 sentences)
         - How it's performed recently (last week, month, year if available)
@@ -468,64 +718,112 @@ function LookUpTab() {
         - A simple honest take: what kind of investor is this suited for?
         - Any risks to be aware of right now
         
-        Keep it friendly and jargon-free. If it's a Singapore product, mention SGD returns and local context.`,
-        SYSTEM
-      );
+        Keep it friendly and jargon-free. If it's a Singapore product, mention SGD returns and local context.`, SYSTEM);
       setText(result);
-    } catch { setText("Couldn't load that. Try again."); }
+    } catch {
+      setText("Couldn't load that. Try again.");
+    }
     setLoading(false);
   };
-
   const current = assetTypes.find(a => a.id === assetType);
-
-  return (
-    <div>
-      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 16 }}>
-        Look up any stock, ETF, or Singapore unit trust in plain English.
-      </p>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {assetTypes.map(a => <Chip key={a.id} label={a.label} active={assetType === a.id} onClick={() => { setAssetType(a.id); setText(""); setActive(null); }} />)}
-      </div>
-
-      <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
-        <input
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && lookup(query)}
-          placeholder={current?.placeholder}
-          style={{
-            flex: 1, border: "1.5px solid #e5e7eb", borderRadius: 10,
-            padding: "11px 16px", fontSize: 14, outline: "none", color: "#111",
-            fontFamily: "'DM Sans', sans-serif",
-            transition: "border-color 0.15s"
-          }}
-        />
-        <button onClick={() => lookup(query)} style={{
-          background: "#6366f1", color: "#fff", border: "none", borderRadius: 10,
-          padding: "11px 22px", fontSize: 14, fontWeight: 600, cursor: "pointer",
-          fontFamily: "'DM Sans', sans-serif"
-        }}>Search</button>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 24 }}>
-        <span style={{ fontSize: 12, color: "#9ca3af", alignSelf: "center" }}>Try:</span>
-        {(presets[assetType] || []).map(p => (
-          <button key={p} onClick={() => { setQuery(p); lookup(p); }} style={{
-            background: active === p ? "#ede9fe" : "#f9fafb",
-            color: active === p ? "#6366f1" : "#6b7280",
-            border: `1px solid ${active === p ? "#c4b5fd" : "#e5e7eb"}`,
-            borderRadius: 8, padding: "5px 12px", fontSize: 12,
-            cursor: "pointer", fontFamily: "'DM Sans', sans-serif"
-          }}>{p}</button>
-        ))}
-      </div>
-
-      <div style={{ background: "#fafafa", borderRadius: 12, padding: 24, border: "1px solid #f0f0f0", minHeight: 120 }}>
-        <ResultBox text={text} loading={loading} placeholder="Search for something above to get started." />
-      </div>
-    </div>
-  );
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: "#6b7280",
+      fontSize: 14,
+      marginBottom: 16
+    }
+  }, "Look up any stock, ETF, or Singapore unit trust in plain English."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginBottom: 20
+    }
+  }, assetTypes.map(a => /*#__PURE__*/React.createElement(Chip, {
+    key: a.id,
+    label: a.label,
+    active: assetType === a.id,
+    onClick: () => {
+      setAssetType(a.id);
+      setText("");
+      setActive(null);
+    }
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 10,
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("input", {
+    value: query,
+    onChange: e => setQuery(e.target.value),
+    onKeyDown: e => e.key === "Enter" && lookup(query),
+    placeholder: current?.placeholder,
+    style: {
+      flex: 1,
+      border: "1.5px solid #e5e7eb",
+      borderRadius: 10,
+      padding: "11px 16px",
+      fontSize: 14,
+      outline: "none",
+      color: "#111",
+      fontFamily: "'DM Sans', sans-serif",
+      transition: "border-color 0.15s"
+    }
+  }), /*#__PURE__*/React.createElement("button", {
+    onClick: () => lookup(query),
+    style: {
+      background: "#6366f1",
+      color: "#fff",
+      border: "none",
+      borderRadius: 10,
+      padding: "11px 22px",
+      fontSize: 14,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "'DM Sans', sans-serif"
+    }
+  }, "Search")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      flexWrap: "wrap",
+      marginBottom: 24
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: "#9ca3af",
+      alignSelf: "center"
+    }
+  }, "Try:"), (presets[assetType] || []).map(p => /*#__PURE__*/React.createElement("button", {
+    key: p,
+    onClick: () => {
+      setQuery(p);
+      lookup(p);
+    },
+    style: {
+      background: active === p ? "#ede9fe" : "#f9fafb",
+      color: active === p ? "#6366f1" : "#6b7280",
+      border: `1px solid ${active === p ? "#c4b5fd" : "#e5e7eb"}`,
+      borderRadius: 8,
+      padding: "5px 12px",
+      fontSize: 12,
+      cursor: "pointer",
+      fontFamily: "'DM Sans', sans-serif"
+    }
+  }, p))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#fafafa",
+      borderRadius: 12,
+      padding: 24,
+      border: "1px solid #f0f0f0",
+      minHeight: 120
+    }
+  }, /*#__PURE__*/React.createElement(ResultBox, {
+    text: text,
+    loading: loading,
+    placeholder: "Search for something above to get started."
+  })));
 }
 
 // ─── TAB 4: QUICK SCAN ───────────────────────────────────────────────────────
@@ -534,70 +832,108 @@ function QuickScanTab() {
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(false);
   const [scanType, setScanType] = useState("overview");
-
-  const scanTypes = [
-    { id: "overview", label: "Quick overview" },
-    { id: "performance", label: "Recent performance" },
-    { id: "news", label: "Latest news" },
-    { id: "risk", label: "Risk check" },
-  ];
-
+  const scanTypes = [{
+    id: "overview",
+    label: "Quick overview"
+  }, {
+    id: "performance",
+    label: "Recent performance"
+  }, {
+    id: "news",
+    label: "Latest news"
+  }, {
+    id: "risk",
+    label: "Risk check"
+  }];
   const scan = async () => {
     if (!items.trim()) return;
-    setLoading(true); setText("");
+    setLoading(true);
+    setText("");
     try {
-      const result = await callClaude(
-        `Do a "${scanType}" scan on these investments: ${items}.
+      const result = await callClaude(`Do a "${scanType}" scan on these investments: ${items}.
         Search for current info on each one.
         For each item, give a short 3-5 sentence summary based on the scan type.
         Use plain language. Group each investment clearly with its name as a header.
-        If any of these are Singapore-listed (like .SI tickers or STI ETFs), note that context.`,
-        SYSTEM
-      );
+        If any of these are Singapore-listed (like .SI tickers or STI ETFs), note that context.`, SYSTEM);
       setText(result);
-    } catch { setText("Couldn't run the scan. Try again."); }
+    } catch {
+      setText("Couldn't run the scan. Try again.");
+    }
     setLoading(false);
   };
-
-  return (
-    <div>
-      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 20 }}>
-        Paste in a list of stocks, ETFs, or unit trusts — get a quick read on all of them at once.
-      </p>
-
-      <div style={{ marginBottom: 16 }}>
-        <label style={{ fontSize: 13, fontWeight: 600, color: "#374151", display: "block", marginBottom: 6 }}>Your watchlist</label>
-        <textarea
-          value={items}
-          onChange={e => setItems(e.target.value)}
-          placeholder="e.g. AAPL, NVDA, ES3.SI, VOO, Nikko AM STI..."
-          style={{
-            width: "100%", border: "1.5px solid #e5e7eb", borderRadius: 10,
-            padding: "11px 16px", fontSize: 14, outline: "none", color: "#111",
-            fontFamily: "'DM Sans', sans-serif", resize: "vertical", minHeight: 80
-          }}
-        />
-      </div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
-        {scanTypes.map(s => <Chip key={s.id} label={s.label} active={scanType === s.id} onClick={() => setScanType(s.id)} />)}
-      </div>
-
-      <button onClick={scan} style={{
-        background: loading ? "#e5e7eb" : "#6366f1",
-        color: loading ? "#9ca3af" : "#fff",
-        border: "none", borderRadius: 10, padding: "12px 24px",
-        fontSize: 14, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer",
-        fontFamily: "'DM Sans', sans-serif", marginBottom: 24, width: "100%"
-      }}>
-        {loading ? "Scanning..." : `Run ${scanTypes.find(s=>s.id===scanType)?.label}`}
-      </button>
-
-      <div style={{ background: "#fafafa", borderRadius: 12, padding: 24, border: "1px solid #f0f0f0", minHeight: 120 }}>
-        <ResultBox text={text} loading={loading} placeholder="Add your investments above and run a scan." />
-      </div>
-    </div>
-  );
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: "#6b7280",
+      fontSize: 14,
+      marginBottom: 20
+    }
+  }, "Paste in a list of stocks, ETFs, or unit trusts \u2014 get a quick read on all of them at once."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 16
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 13,
+      fontWeight: 600,
+      color: "#374151",
+      display: "block",
+      marginBottom: 6
+    }
+  }, "Your watchlist"), /*#__PURE__*/React.createElement("textarea", {
+    value: items,
+    onChange: e => setItems(e.target.value),
+    placeholder: "e.g. AAPL, NVDA, ES3.SI, VOO, Nikko AM STI...",
+    style: {
+      width: "100%",
+      border: "1.5px solid #e5e7eb",
+      borderRadius: 10,
+      padding: "11px 16px",
+      fontSize: 14,
+      outline: "none",
+      color: "#111",
+      fontFamily: "'DM Sans', sans-serif",
+      resize: "vertical",
+      minHeight: 80
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8,
+      marginBottom: 20
+    }
+  }, scanTypes.map(s => /*#__PURE__*/React.createElement(Chip, {
+    key: s.id,
+    label: s.label,
+    active: scanType === s.id,
+    onClick: () => setScanType(s.id)
+  }))), /*#__PURE__*/React.createElement("button", {
+    onClick: scan,
+    style: {
+      background: loading ? "#e5e7eb" : "#6366f1",
+      color: loading ? "#9ca3af" : "#fff",
+      border: "none",
+      borderRadius: 10,
+      padding: "12px 24px",
+      fontSize: 14,
+      fontWeight: 600,
+      cursor: loading ? "not-allowed" : "pointer",
+      fontFamily: "'DM Sans', sans-serif",
+      marginBottom: 24,
+      width: "100%"
+    }
+  }, loading ? "Scanning..." : `Run ${scanTypes.find(s => s.id === scanType)?.label}`), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#fafafa",
+      borderRadius: 12,
+      padding: 24,
+      border: "1px solid #f0f0f0",
+      minHeight: 120
+    }
+  }, /*#__PURE__*/React.createElement(ResultBox, {
+    text: text,
+    loading: loading,
+    placeholder: "Add your investments above and run a scan."
+  })));
 }
 
 // ─── TAB 5: CLIENT LETTER ────────────────────────────────────────────────────
@@ -605,30 +941,37 @@ function ClientLetterTab() {
   const [firmName, setFirmName] = useState("");
   const [advisorName, setAdvisorName] = useState("");
   const [clientName, setClientName] = useState("");
-  const [month, setMonth] = useState(() => { const d = new Date(); return `${d.toLocaleString("default",{month:"long"})} ${d.getFullYear()}`; });
+  const [month, setMonth] = useState(() => {
+    const d = new Date();
+    return `${d.toLocaleString("default", {
+      month: "long"
+    })} ${d.getFullYear()}`;
+  });
   const [focus, setFocus] = useState("");
   const [notes, setNotes] = useState("");
   const [tone, setTone] = useState("warm");
   const [preview, setPreview] = useState("");
   const [loading, setLoading] = useState(false);
-
-  const tones = [
-    { id: "warm", label: "Warm & reassuring" },
-    { id: "balanced", label: "Balanced & informative" },
-    { id: "concise", label: "Short & to the point" },
-  ];
-
+  const tones = [{
+    id: "warm",
+    label: "Warm & reassuring"
+  }, {
+    id: "balanced",
+    label: "Balanced & informative"
+  }, {
+    id: "concise",
+    label: "Short & to the point"
+  }];
   const toneDescriptions = {
     warm: "empathetic, reassuring, like a trusted advisor checking in",
     balanced: "professional but approachable, balanced between data and narrative",
     concise: "brief and clear, bullet-heavy, respects the client's time"
   };
-
   const generate = async () => {
-    setLoading(true); setPreview("");
+    setLoading(true);
+    setPreview("");
     try {
-      const result = await callClaude(
-        `Write a monthly investment update letter for ${month}.
+      const result = await callClaude(`Write a monthly investment update letter for ${month}.
         ${firmName ? `Firm: ${firmName}.` : ""} 
         ${advisorName ? `Advisor: ${advisorName}.` : ""}
         Client: ${clientName || "Valued Client"}.
@@ -648,18 +991,21 @@ function ClientLetterTab() {
         6. Warm closing sign-off
         
         Write it like a real human advisor, not a corporate newsletter. Avoid clichés like "in these uncertain times".
-        About 450-600 words.`,
-        `You are a warm, thoughtful financial advisor writing a personal letter to a client. 
+        About 450-600 words.`, `You are a warm, thoughtful financial advisor writing a personal letter to a client. 
         Write in first person. Be honest, clear, and human. No jargon. No corporate-speak.
-        Search the web for actual market data for this month before writing.`
-      );
+        Search the web for actual market data for this month before writing.`);
       setPreview(result);
-    } catch { setPreview("Couldn't generate the letter. Please try again."); }
+    } catch {
+      setPreview("Couldn't generate the letter. Please try again.");
+    }
     setLoading(false);
   };
-
   const exportDoc = () => {
-    const now = new Date().toLocaleDateString("en-SG", { year:"numeric", month:"long", day:"numeric" });
+    const now = new Date().toLocaleDateString("en-SG", {
+      year: "numeric",
+      month: "long",
+      day: "numeric"
+    });
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
 <style>
 body { font-family: Georgia, serif; font-size: 12pt; margin: 1.2in 1in; color: #1a1a1a; line-height: 1.7; }
@@ -674,181 +1020,443 @@ ${firmName ? `<div class="firm">${firmName}</div>` : ""}
 <div class="meta">${advisorName ? `${advisorName} &nbsp;|&nbsp; ` : ""}${month} &nbsp;|&nbsp; ${now}</div>
 <hr>
 <p><strong>Dear ${clientName || "Valued Client"},</strong></p>
-${preview.split("\n").filter(l=>l.trim()).map(l => {
-  if (l.startsWith("## ") || l.startsWith("### ")) return `<h2>${l.replace(/^#+\s*/,"")}</h2>`;
-  if (l.startsWith("- ") || l.startsWith("• ")) return `<p style="margin-left:20px">• ${l.replace(/^[-•]\s*/,"")}</p>`;
-  return `<p>${l}</p>`;
-}).join("\n")}
-<div class="footer">This letter is prepared by ${advisorName||"your advisor"} for informational purposes only and does not constitute financial advice. Please speak with your advisor before making any investment decisions.</div>
+${preview.split("\n").filter(l => l.trim()).map(l => {
+      if (l.startsWith("## ") || l.startsWith("### ")) return `<h2>${l.replace(/^#+\s*/, "")}</h2>`;
+      if (l.startsWith("- ") || l.startsWith("• ")) return `<p style="margin-left:20px">• ${l.replace(/^[-•]\s*/, "")}</p>`;
+      return `<p>${l}</p>`;
+    }).join("\n")}
+<div class="footer">This letter is prepared by ${advisorName || "your advisor"} for informational purposes only and does not constitute financial advice. Please speak with your advisor before making any investment decisions.</div>
 </body></html>`;
-
-    const blob = new Blob([html], { type: "application/msword" });
+    const blob = new Blob([html], {
+      type: "application/msword"
+    });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Investment-Update-${month.replace(/\s/g,"-")}.doc`;
+    a.download = `Investment-Update-${month.replace(/\s/g, "-")}.doc`;
     a.click();
     URL.revokeObjectURL(url);
   };
-
   const inputStyle = {
-    width: "100%", border: "1.5px solid #e5e7eb", borderRadius: 10,
-    padding: "10px 14px", fontSize: 14, outline: "none", color: "#111",
-    fontFamily: "'DM Sans', sans-serif", background: "#fff"
+    width: "100%",
+    border: "1.5px solid #e5e7eb",
+    borderRadius: 10,
+    padding: "10px 14px",
+    fontSize: 14,
+    outline: "none",
+    color: "#111",
+    fontFamily: "'DM Sans', sans-serif",
+    background: "#fff"
   };
-
-  return (
-    <div>
-      <p style={{ color: "#6b7280", fontSize: 14, marginBottom: 20 }}>
-        Fill in a few details and get a personalised monthly letter ready to send to your client.
-      </p>
-
-      <div style={{ background: "#fafafa", borderRadius: 12, padding: 24, border: "1px solid #f0f0f0", marginBottom: 24 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 14 }}>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Your firm name</label>
-            <input value={firmName} onChange={e=>setFirmName(e.target.value)} placeholder="e.g. Meridian Wealth" style={inputStyle}/>
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Your name</label>
-            <input value={advisorName} onChange={e=>setAdvisorName(e.target.value)} placeholder="e.g. Sarah Lim, CFP" style={inputStyle}/>
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Client name</label>
-            <input value={clientName} onChange={e=>setClientName(e.target.value)} placeholder="e.g. Mr and Mrs Tan" style={inputStyle}/>
-          </div>
-          <div>
-            <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Month</label>
-            <input value={month} onChange={e=>setMonth(e.target.value)} style={inputStyle}/>
-          </div>
-        </div>
-
-        <div style={{ marginBottom: 14 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Portfolio focus</label>
-          <input value={focus} onChange={e=>setFocus(e.target.value)} placeholder="e.g. 60/40 equities and bonds, some Singapore REITs, long-term growth" style={inputStyle}/>
-        </div>
-
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 5 }}>Anything specific to mention? <span style={{fontWeight:400}}>(optional)</span></label>
-          <textarea value={notes} onChange={e=>setNotes(e.target.value)} placeholder="e.g. Client is nervous about rate cuts, recently added to REITs, planning retirement in 3 years..." style={{ ...inputStyle, minHeight: 70, resize: "vertical" }}/>
-        </div>
-
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ fontSize: 12, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 8 }}>Letter tone</label>
-          <div style={{ display: "flex", gap: 8 }}>
-            {tones.map(t => <Chip key={t.id} label={t.label} active={tone===t.id} onClick={() => setTone(t.id)} />)}
-          </div>
-        </div>
-
-        <button onClick={generate} disabled={loading} style={{
-          background: loading ? "#e5e7eb" : "#6366f1",
-          color: loading ? "#9ca3af" : "#fff",
-          border: "none", borderRadius: 10, padding: "13px 0",
-          fontSize: 14, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer",
-          fontFamily: "'DM Sans', sans-serif", width: "100%"
-        }}>
-          {loading ? "Writing your letter..." : "Generate letter"}
-        </button>
-      </div>
-
-      {(preview || loading) && (
-        <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>Preview</span>
-            {preview && !loading && (
-              <button onClick={exportDoc} style={{
-                background: "#fff", color: "#6366f1", border: "1.5px solid #6366f1",
-                borderRadius: 8, padding: "7px 16px", fontSize: 13,
-                fontWeight: 600, cursor: "pointer", fontFamily: "'DM Sans', sans-serif"
-              }}>⬇ Download as Word</button>
-            )}
-          </div>
-
-          {/* Letter preview — looks like paper */}
-          <div style={{ background: "#fff", borderRadius: 12, padding: "40px 48px", border: "1px solid #e5e7eb", boxShadow: "0 4px 24px rgba(0,0,0,0.06)", fontFamily: "Georgia, serif" }}>
-            {firmName && <div style={{ fontSize: 18, fontWeight: 700, color: "#2c3e50", marginBottom: 2 }}>{firmName}</div>}
-            {advisorName && <div style={{ fontSize: 12, color: "#9ca3af", marginBottom: 24 }}>{advisorName} · {month}</div>}
-            <div style={{ borderTop: "1px solid #e5e7eb", marginBottom: 20 }}/>
-            {loading ? <Spinner color="#6366f1" /> : (
-              <div style={{ fontSize: 14, lineHeight: 1.85, color: "#374151" }}>
-                <ResultBox text={preview} loading={false} placeholder="" />
-              </div>
-            )}
-            {preview && !loading && (
-              <div style={{ marginTop: 32, paddingTop: 16, borderTop: "1px solid #f0f0f0", fontSize: 11, color: "#d1d5db" }}>
-                For informational purposes only. Not financial advice. Please consult your advisor.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("p", {
+    style: {
+      color: "#6b7280",
+      fontSize: 14,
+      marginBottom: 20
+    }
+  }, "Fill in a few details and get a personalised monthly letter ready to send to your client."), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#fafafa",
+      borderRadius: 12,
+      padding: 24,
+      border: "1px solid #f0f0f0",
+      marginBottom: 24
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: 14,
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 12,
+      fontWeight: 600,
+      color: "#6b7280",
+      display: "block",
+      marginBottom: 5
+    }
+  }, "Your firm name"), /*#__PURE__*/React.createElement("input", {
+    value: firmName,
+    onChange: e => setFirmName(e.target.value),
+    placeholder: "e.g. Meridian Wealth",
+    style: inputStyle
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 12,
+      fontWeight: 600,
+      color: "#6b7280",
+      display: "block",
+      marginBottom: 5
+    }
+  }, "Your name"), /*#__PURE__*/React.createElement("input", {
+    value: advisorName,
+    onChange: e => setAdvisorName(e.target.value),
+    placeholder: "e.g. Sarah Lim, CFP",
+    style: inputStyle
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 12,
+      fontWeight: 600,
+      color: "#6b7280",
+      display: "block",
+      marginBottom: 5
+    }
+  }, "Client name"), /*#__PURE__*/React.createElement("input", {
+    value: clientName,
+    onChange: e => setClientName(e.target.value),
+    placeholder: "e.g. Mr and Mrs Tan",
+    style: inputStyle
+  })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 12,
+      fontWeight: 600,
+      color: "#6b7280",
+      display: "block",
+      marginBottom: 5
+    }
+  }, "Month"), /*#__PURE__*/React.createElement("input", {
+    value: month,
+    onChange: e => setMonth(e.target.value),
+    style: inputStyle
+  }))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 14
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 12,
+      fontWeight: 600,
+      color: "#6b7280",
+      display: "block",
+      marginBottom: 5
+    }
+  }, "Portfolio focus"), /*#__PURE__*/React.createElement("input", {
+    value: focus,
+    onChange: e => setFocus(e.target.value),
+    placeholder: "e.g. 60/40 equities and bonds, some Singapore REITs, long-term growth",
+    style: inputStyle
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 12,
+      fontWeight: 600,
+      color: "#6b7280",
+      display: "block",
+      marginBottom: 5
+    }
+  }, "Anything specific to mention? ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontWeight: 400
+    }
+  }, "(optional)")), /*#__PURE__*/React.createElement("textarea", {
+    value: notes,
+    onChange: e => setNotes(e.target.value),
+    placeholder: "e.g. Client is nervous about rate cuts, recently added to REITs, planning retirement in 3 years...",
+    style: {
+      ...inputStyle,
+      minHeight: 70,
+      resize: "vertical"
+    }
+  })), /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginBottom: 20
+    }
+  }, /*#__PURE__*/React.createElement("label", {
+    style: {
+      fontSize: 12,
+      fontWeight: 600,
+      color: "#6b7280",
+      display: "block",
+      marginBottom: 8
+    }
+  }, "Letter tone"), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      gap: 8
+    }
+  }, tones.map(t => /*#__PURE__*/React.createElement(Chip, {
+    key: t.id,
+    label: t.label,
+    active: tone === t.id,
+    onClick: () => setTone(t.id)
+  })))), /*#__PURE__*/React.createElement("button", {
+    onClick: generate,
+    disabled: loading,
+    style: {
+      background: loading ? "#e5e7eb" : "#6366f1",
+      color: loading ? "#9ca3af" : "#fff",
+      border: "none",
+      borderRadius: 10,
+      padding: "13px 0",
+      fontSize: 14,
+      fontWeight: 600,
+      cursor: loading ? "not-allowed" : "pointer",
+      fontFamily: "'DM Sans', sans-serif",
+      width: "100%"
+    }
+  }, loading ? "Writing your letter..." : "Generate letter")), (preview || loading) && /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      marginBottom: 12
+    }
+  }, /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 13,
+      fontWeight: 600,
+      color: "#374151"
+    }
+  }, "Preview"), preview && !loading && /*#__PURE__*/React.createElement("button", {
+    onClick: exportDoc,
+    style: {
+      background: "#fff",
+      color: "#6366f1",
+      border: "1.5px solid #6366f1",
+      borderRadius: 8,
+      padding: "7px 16px",
+      fontSize: 13,
+      fontWeight: 600,
+      cursor: "pointer",
+      fontFamily: "'DM Sans', sans-serif"
+    }
+  }, "\u2B07 Download as Word")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#fff",
+      borderRadius: 12,
+      padding: "40px 48px",
+      border: "1px solid #e5e7eb",
+      boxShadow: "0 4px 24px rgba(0,0,0,0.06)",
+      fontFamily: "Georgia, serif"
+    }
+  }, firmName && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 18,
+      fontWeight: 700,
+      color: "#2c3e50",
+      marginBottom: 2
+    }
+  }, firmName), advisorName && /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 12,
+      color: "#9ca3af",
+      marginBottom: 24
+    }
+  }, advisorName, " \xB7 ", month), /*#__PURE__*/React.createElement("div", {
+    style: {
+      borderTop: "1px solid #e5e7eb",
+      marginBottom: 20
+    }
+  }), loading ? /*#__PURE__*/React.createElement(Spinner, {
+    color: "#6366f1"
+  }) : /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 14,
+      lineHeight: 1.85,
+      color: "#374151"
+    }
+  }, /*#__PURE__*/React.createElement(ResultBox, {
+    text: preview,
+    loading: false,
+    placeholder: ""
+  })), preview && !loading && /*#__PURE__*/React.createElement("div", {
+    style: {
+      marginTop: 32,
+      paddingTop: 16,
+      borderTop: "1px solid #f0f0f0",
+      fontSize: 11,
+      color: "#d1d5db"
+    }
+  }, "For informational purposes only. Not financial advice. Please consult your advisor."))));
 }
 
 // ─── MAIN APP ────────────────────────────────────────────────────────────────
 function App() {
   const [activeTab, setActiveTab] = useState(0);
-
-  return (
-    <div style={{ background: "#f8f7f5", minHeight: "100vh", fontFamily: "'DM Sans', sans-serif" }}>
-      <style>{`
+  return /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#f8f7f5",
+      minHeight: "100vh",
+      fontFamily: "'DM Sans', sans-serif"
+    }
+  }, /*#__PURE__*/React.createElement("style", null, `
         @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap');
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
         * { box-sizing: border-box; }
         input:focus, textarea:focus { border-color: #6366f1 !important; }
         button { transition: all 0.15s; }
-      `}</style>
+      `), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#fff",
+      borderBottom: "1px solid #f0f0f0",
+      padding: "18px 32px",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between"
+    }
+  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 20,
+      fontFamily: "'DM Serif Display', serif",
+      color: "#111827",
+      letterSpacing: "-0.3px"
+    }
+  }, "Clearview ", /*#__PURE__*/React.createElement("span", {
+    style: {
+      color: "#6366f1"
+    }
+  }, "Insights")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      fontSize: 11,
+      color: "#9ca3af",
+      marginTop: 1
+    }
+  }, "Your markets, in plain English")), /*#__PURE__*/React.createElement("div", {
+    style: {
+      display: "flex",
+      alignItems: "center",
+      gap: 8
+    }
+  }, /*#__PURE__*/React.createElement("div", {
+    style: {
+      width: 7,
+      height: 7,
+      borderRadius: "50%",
+      background: "#10b981"
+    }
+  }), /*#__PURE__*/React.createElement("span", {
+    style: {
+      fontSize: 12,
+      color: "#6b7280"
+    }
+  }, "Live data"))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      background: "#fff",
+      borderBottom: "1px solid #f0f0f0",
+      padding: "0 32px",
+      display: "flex",
+      gap: 0,
+      overflowX: "auto"
+    }
+  }, TABS.map((tab, i) => /*#__PURE__*/React.createElement("button", {
+    key: tab.id,
+    onClick: () => setActiveTab(i),
+    style: {
+      background: "transparent",
+      border: "none",
+      borderBottom: `2px solid ${activeTab === i ? "#6366f1" : "transparent"}`,
+      color: activeTab === i ? "#6366f1" : "#6b7280",
+      padding: "14px 16px",
+      fontSize: 13,
+      fontFamily: "'DM Sans', sans-serif",
+      fontWeight: activeTab === i ? 600 : 400,
+      cursor: "pointer",
+      whiteSpace: "nowrap",
+      display: "flex",
+      alignItems: "center",
+      gap: 6
+    }
+  }, /*#__PURE__*/React.createElement("span", null, tab.emoji), " ", tab.label))), /*#__PURE__*/React.createElement("div", {
+    style: {
+      maxWidth: 860,
+      margin: "0 auto",
+      padding: "32px 24px",
+      animation: "fadeIn 0.25s ease"
+    }
+  }, activeTab === 0 && /*#__PURE__*/React.createElement(WhatsHappeningTab, null), activeTab === 1 && /*#__PURE__*/React.createElement(NewsByIndustryTab, null), activeTab === 2 && /*#__PURE__*/React.createElement(LookUpTab, null), activeTab === 3 && /*#__PURE__*/React.createElement(QuickScanTab, null), activeTab === 4 && /*#__PURE__*/React.createElement(ClientLetterTab, null)), /*#__PURE__*/React.createElement("div", {
+    style: {
+      textAlign: "center",
+      padding: "20px 0 32px",
+      fontSize: 11,
+      color: "#d1d5db"
+    }
+  }, "For informational purposes only \xB7 Not financial advice \xB7 Clearview Insights"));
+}
 
-      {/* Header */}
-      <div style={{ background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "18px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div>
-          <div style={{ fontSize: 20, fontFamily: "'DM Serif Display', serif", color: "#111827", letterSpacing: "-0.3px" }}>
-            Clearview <span style={{ color: "#6366f1" }}>Insights</span>
-          </div>
-          <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 1 }}>Your markets, in plain English</div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981" }}/>
-          <span style={{ fontSize: 12, color: "#6b7280" }}>Live data</span>
-        </div>
-      </div>
+function ApiKeyGate({ children }) {
+  const stored = localStorage.getItem('clearview_api_key') || '';
+  const [key, setKey] = React.useState(stored);
+  const [input, setInput] = React.useState('');
+  const [error, setError] = React.useState('');
+  const [testing, setTesting] = React.useState(false);
 
-      {/* Tab bar */}
-      <div style={{ background: "#fff", borderBottom: "1px solid #f0f0f0", padding: "0 32px", display: "flex", gap: 0, overflowX: "auto" }}>
-        {TABS.map((tab, i) => (
-          <button key={tab.id} onClick={() => setActiveTab(i)} style={{
-            background: "transparent", border: "none",
-            borderBottom: `2px solid ${activeTab === i ? "#6366f1" : "transparent"}`,
-            color: activeTab === i ? "#6366f1" : "#6b7280",
-            padding: "14px 16px", fontSize: 13,
-            fontFamily: "'DM Sans', sans-serif", fontWeight: activeTab === i ? 600 : 400,
-            cursor: "pointer", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 6
-          }}>
-            <span>{tab.emoji}</span> {tab.label}
-          </button>
-        ))}
-      </div>
+  if (key) {
+    window.__CLEARVIEW_API_KEY__ = key;
+    return children;
+  }
 
-      {/* Content */}
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "32px 24px", animation: "fadeIn 0.25s ease" }}>
-        {activeTab === 0 && <WhatsHappeningTab />}
-        {activeTab === 1 && <NewsByIndustryTab />}
-        {activeTab === 2 && <LookUpTab />}
-        {activeTab === 3 && <QuickScanTab />}
-        {activeTab === 4 && <ClientLetterTab />}
-      </div>
+  const save = async () => {
+    if (!input.trim().startsWith('sk-ant-')) {
+      setError('That doesn\'t look right — Anthropic keys start with sk-ant-');
+      return;
+    }
+    setTesting(true); setError('');
+    try {
+      const res = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': input.trim(),
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true'
+        },
+        body: JSON.stringify({ model: 'claude-sonnet-4-20250514', max_tokens: 10, messages: [{ role: 'user', content: 'hi' }] })
+      });
+      const data = await res.json();
+      if (data.error) { setError('Key rejected: ' + data.error.message); setTesting(false); return; }
+      localStorage.setItem('clearview_api_key', input.trim());
+      window.__CLEARVIEW_API_KEY__ = input.trim();
+      setKey(input.trim());
+    } catch(e) {
+      setError('Could not connect. Check your internet connection.');
+    }
+    setTesting(false);
+  };
 
-      <div style={{ textAlign: "center", padding: "20px 0 32px", fontSize: 11, color: "#d1d5db" }}>
-        For informational purposes only · Not financial advice · Clearview Insights
-      </div>
-    </div>
+  return React.createElement('div', {
+    style: { minHeight: '100vh', background: '#f8f7f5', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }
+  },
+    React.createElement('div', {
+      style: { background: '#fff', borderRadius: 16, padding: '48px 40px', maxWidth: 460, width: '100%', boxShadow: '0 4px 32px rgba(0,0,0,0.08)' }
+    },
+      React.createElement('div', { style: { fontSize: 22, fontFamily: '\'DM Serif Display\', serif', color: '#111827', marginBottom: 4 } },
+        'Clearview ', React.createElement('span', { style: { color: '#6366f1' } }, 'Insights')
+      ),
+      React.createElement('div', { style: { fontSize: 12, color: '#9ca3af', marginBottom: 32 } }, 'Your markets, in plain English'),
+      React.createElement('div', { style: { fontSize: 15, fontWeight: 600, color: '#374151', marginBottom: 8 } }, 'Enter your Anthropic API key to get started'),
+      React.createElement('div', { style: { fontSize: 13, color: '#6b7280', marginBottom: 24, lineHeight: 1.6 } },
+        'Your key is saved in your browser only — never sent anywhere except directly to Anthropic. Get one free at ',
+        React.createElement('a', { href: 'https://console.anthropic.com', target: '_blank', style: { color: '#6366f1' } }, 'console.anthropic.com')
+      ),
+      React.createElement('input', {
+        type: 'password',
+        value: input,
+        onChange: e => setInput(e.target.value),
+        onKeyDown: e => e.key === 'Enter' && save(),
+        placeholder: 'sk-ant-api03-...',
+        style: { width: '100%', border: '1.5px solid #e5e7eb', borderRadius: 10, padding: '11px 14px', fontSize: 14, color: '#111', marginBottom: 12, fontFamily: 'monospace' }
+      }),
+      error && React.createElement('div', { style: { fontSize: 13, color: '#ef4444', marginBottom: 12 } }, error),
+      React.createElement('button', {
+        onClick: save,
+        disabled: testing,
+        style: { width: '100%', background: testing ? '#e5e7eb' : '#6366f1', color: testing ? '#9ca3af' : '#fff', border: 'none', borderRadius: 10, padding: '12px 0', fontSize: 14, fontWeight: 600, cursor: testing ? 'not-allowed' : 'pointer' }
+      }, testing ? 'Checking key...' : 'Save & continue →'),
+      React.createElement('div', { style: { fontSize: 11, color: '#d1d5db', marginTop: 20, textAlign: 'center' } },
+        'Key stored in localStorage — clear browser data to reset'
+      )
+    )
   );
 }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(React.createElement(ApiKeyGate, null, React.createElement(App, null)));
   </script>
 </body>
 </html>
