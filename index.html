@@ -24,19 +24,16 @@ input:focus,textarea:focus{outline:none;border-color:#6366f1!important;}
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
 
-const API_KEY = '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';
+
 
 async function callClaude(userMessage, systemPrompt) {
   const messages = [{ role: 'user', content: userMessage }];
   let finalText = '';
   for (let i = 0; i < 6; i++) {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch('/.netlify/functions/claude', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': API_KEY,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
