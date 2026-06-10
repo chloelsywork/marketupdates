@@ -1,4 +1,6 @@
 exports.handler = async (event) => {
+  console.log('Function called, method:', event.httpMethod);
+
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 200,
@@ -16,12 +18,22 @@ exports.handler = async (event) => {
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
+  console.log('API key present:', !!apiKey);
+  console.log('API key length:', apiKey ? apiKey.length : 0);
+
   if (!apiKey) {
-    return { statusCode: 500, body: JSON.stringify({ error: 'API key not configured' }) };
+    console.log('ERROR: No API key found');
+    return {
+      statusCode: 500,
+      headers: { 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ error: 'API key not configured' })
+    };
   }
 
   try {
     const body = JSON.parse(event.body);
+    console.log('Calling Anthropic, model:', body.model);
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -31,7 +43,11 @@ exports.handler = async (event) => {
       },
       body: JSON.stringify(body)
     });
+
+    console.log('Anthropic response status:', response.status);
     const data = await response.json();
+    console.log('Anthropic response type:', data.type, 'error:', data.error?.message);
+
     return {
       statusCode: 200,
       headers: {
@@ -41,6 +57,7 @@ exports.handler = async (event) => {
       body: JSON.stringify(data)
     };
   } catch (err) {
+    console.log('ERROR:', err.message);
     return {
       statusCode: 500,
       headers: { 'Access-Control-Allow-Origin': '*' },
