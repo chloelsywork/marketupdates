@@ -438,7 +438,6 @@ Be specific. Use real numbers. No asterisks. No markdown headers with #.`,
     }));
 
     setExporting(false);
-    const date = new Date().toLocaleDateString('en-SG', { year:'numeric', month:'long', day:'numeric' });
     exportMarketPDF(fetched.map(t => ({ topic: t.id, text: cache[t.id] })), date, { name, telegram, instagram });
   };
 
