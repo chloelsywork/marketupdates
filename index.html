@@ -121,7 +121,7 @@ function Chip({ label, active, onClick, color='#6366f1' }) {
 
 // ── PDF EXPORT ───────────────────────────────────────────────────────────────
 
-function exportMarketPDF(snapshots, date) {
+function exportMarketPDF(snapshots, date, contact={}) {
   const G='#3d6b4f', LG='#8fbc8f', PALE='#edf4ee', DARK='#2c3e2d';
   const COLORS=['#3d6b4f','#0ea5e9','#f59e0b','#ef4444','#8b5cf6','#ec4899'];
 
@@ -249,6 +249,13 @@ body{font-family:'Inter',sans-serif;background:#f4f7f4;color:#1a2e1a;width:820px
 /* FOOTER */
 .footer{background:${DARK};color:rgba(255,255,255,0.5);padding:18px 48px;display:flex;justify-content:space-between;font-size:10px;font-family:'Oswald',sans-serif;letter-spacing:1.5px;text-transform:uppercase;}
 .footer strong{color:${LG};}
+.contact-bar{background:#fff;padding:20px 48px;display:flex;justify-content:space-between;align-items:center;border-top:3px solid ${G};}
+.contact-name{font-family:'Oswald',sans-serif;font-size:16px;font-weight:700;color:${DARK};margin-bottom:6px;}
+.contact-handles{display:flex;gap:14px;}
+.handle{font-size:12px;font-weight:600;padding:4px 12px;border-radius:20px;font-family:'Inter',sans-serif;}
+.tg{background:#e8f4fd;color:#0ea5e9;}
+.ig{background:#fdf2f8;color:#ec4899;}
+.contact-right{font-size:11px;color:#9ca3af;font-family:'Oswald',sans-serif;letter-spacing:1px;text-transform:uppercase;}
 
 @media print{
   body{width:100%;}
@@ -312,6 +319,17 @@ body{font-family:'Inter',sans-serif;background:#f4f7f4;color:#1a2e1a;width:820px
   </div>
 </div>
 
+${(contact.name || contact.telegram || contact.instagram) ? `
+<div class="contact-bar">
+  <div class="contact-left">
+    ${contact.name ? `<div class="contact-name">${contact.name}</div>` : ''}
+    <div class="contact-handles">
+      ${contact.telegram ? `<span class="handle tg">✈ ${contact.telegram}</span>` : ''}
+      ${contact.instagram ? `<span class="handle ig">◎ ${contact.instagram}</span>` : ''}
+    </div>
+  </div>
+  <div class="contact-right">Prepared by your financial advisor</div>
+</div>` : ''}
 <div class="footer">
   <div><strong>Clearview Insights</strong> · ${date}</div>
   <div>For informational purposes only · Not financial advice</div>
@@ -333,6 +351,10 @@ function WhatsHappeningTab() {
   const [loading, setLoading] = React.useState(false);
   const [topic, setTopic] = React.useState('global markets today');
   const [cache, setCache] = React.useState({});
+  const [showModal, setShowModal] = React.useState(false);
+  const [name, setName] = React.useState(() => localStorage.getItem('ci_name') || '');
+  const [telegram, setTelegram] = React.useState(() => localStorage.getItem('ci_telegram') || '');
+  const [instagram, setInstagram] = React.useState(() => localStorage.getItem('ci_instagram') || '');
 
   const topics = [
     { id: 'global markets today',                    label: 'Markets today'   },
@@ -360,12 +382,45 @@ function WhatsHappeningTab() {
   const canExport = fetched.length > 0;
 
   const doExport = () => {
+    // save for next time
+    localStorage.setItem('ci_name', name);
+    localStorage.setItem('ci_telegram', telegram);
+    localStorage.setItem('ci_instagram', instagram);
+    setShowModal(false);
     const date = new Date().toLocaleDateString('en-SG', { year:'numeric', month:'long', day:'numeric' });
-    exportMarketPDF(fetched.map(t => ({ topic: t.id, text: cache[t.id] })), date);
+    exportMarketPDF(fetched.map(t => ({ topic: t.id, text: cache[t.id] })), date, { name, telegram, instagram });
   };
+
+  const inp = { width:'100%', border:'1.5px solid #e5e7eb', borderRadius:8, padding:'10px 12px', fontSize:14, color:'#111', outline:'none' };
 
   return (
     <div>
+      {/* Contact details modal */}
+      {showModal && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.4)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000 }}>
+          <div style={{ background:'#fff', borderRadius:16, padding:'36px 32px', width:420, boxShadow:'0 20px 60px rgba(0,0,0,0.2)' }}>
+            <div style={{ fontSize:18, fontWeight:700, color:'#111', marginBottom:4 }}>Your contact details</div>
+            <div style={{ fontSize:13, color:'#6b7280', marginBottom:24 }}>These will appear on the PDF so clients know how to reach you. Saved for next time.</div>
+            <div style={{ marginBottom:14 }}>
+              <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:5 }}>Your name</label>
+              <input value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Sarah Lim" style={inp}/>
+            </div>
+            <div style={{ marginBottom:14 }}>
+              <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:5 }}>Telegram handle</label>
+              <input value={telegram} onChange={e=>setTelegram(e.target.value)} placeholder="e.g. @sarahlim" style={inp}/>
+            </div>
+            <div style={{ marginBottom:28 }}>
+              <label style={{ fontSize:12, fontWeight:600, color:'#374151', display:'block', marginBottom:5 }}>Instagram handle</label>
+              <input value={instagram} onChange={e=>setInstagram(e.target.value)} placeholder="e.g. @sarahlim.wealth" style={inp}/>
+            </div>
+            <div style={{ display:'flex', gap:10 }}>
+              <button onClick={() => setShowModal(false)} style={{ flex:1, background:'#f3f4f6', color:'#6b7280', border:'none', borderRadius:8, padding:'11px 0', fontSize:14, fontWeight:600, cursor:'pointer' }}>Cancel</button>
+              <button onClick={doExport} style={{ flex:2, background:'#3d6b4f', color:'#fff', border:'none', borderRadius:8, padding:'11px 0', fontSize:14, fontWeight:600, cursor:'pointer' }}>🖨️ Export PDF</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <p style={{ color:'#6b7280', fontSize:14, marginBottom:16 }}>Browse topics below — each one loads and gets saved so you can export them all as one PDF briefing.</p>
       <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:16 }}>
         {topics.map(t => (
@@ -379,7 +434,7 @@ function WhatsHappeningTab() {
         <div style={{ fontSize:13, color:canExport?'#3d6b4f':'#9ca3af' }}>
           {canExport ? `${fetched.length} topic${fetched.length!==1?'s':''} ready — export as a styled PDF` : 'Load a topic above, then export as PDF'}
         </div>
-        <button onClick={doExport} disabled={!canExport} style={{ background:canExport?'#3d6b4f':'#e5e7eb', color:canExport?'#fff':'#9ca3af', border:'none', borderRadius:8, padding:'9px 20px', fontSize:13, fontWeight:600, cursor:canExport?'pointer':'not-allowed', marginLeft:12 }}>
+        <button onClick={() => canExport && setShowModal(true)} disabled={!canExport} style={{ background:canExport?'#3d6b4f':'#e5e7eb', color:canExport?'#fff':'#9ca3af', border:'none', borderRadius:8, padding:'9px 20px', fontSize:13, fontWeight:600, cursor:canExport?'pointer':'not-allowed', marginLeft:12 }}>
           🖨️ Export PDF
         </button>
       </div>
