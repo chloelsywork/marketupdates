@@ -25,29 +25,39 @@ async function callClaude(userMessage, systemPrompt) {
   const messages = [{ role: 'user', content: userMessage }];
   let finalText = '';
   for (let i = 0; i < 6; i++) {
-    const res = await fetch('/.netlify/functions/claude', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 1500,
-        tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-        system: systemPrompt,
-        messages
-      })
-    });
-    const data = await res.json();
-    if (!data.content) throw new Error(data.error?.message || 'API error');
-    const textBlocks = data.content.filter(b => b.type === 'text');
-    if (textBlocks.length) finalText = textBlocks.map(b => b.text).join('');
-    if (data.stop_reason === 'end_turn') break;
-    if (data.stop_reason === 'tool_use') {
-      messages.push({ role: 'assistant', content: data.content });
-      const results = data.content
-        .filter(b => b.type === 'tool_use')
-        .map(b => ({ type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(b.input) }));
-      messages.push({ role: 'user', content: results });
-    } else break;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+    try {
+      const res = await fetch('/.netlify/functions/claude', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 1500,
+          tools: [{ type: 'web_search_20250305', name: 'web_search' }],
+          system: systemPrompt,
+          messages
+        })
+      });
+      clearTimeout(timeout);
+      const data = await res.json();
+      if (!data.content) throw new Error(data.error?.message || 'API error');
+      const textBlocks = data.content.filter(b => b.type === 'text');
+      if (textBlocks.length) finalText = textBlocks.map(b => b.text).join('');
+      if (data.stop_reason === 'end_turn') break;
+      if (data.stop_reason === 'tool_use') {
+        messages.push({ role: 'assistant', content: data.content });
+        const results = data.content
+          .filter(b => b.type === 'tool_use')
+          .map(b => ({ type: 'tool_result', tool_use_id: b.id, content: JSON.stringify(b.input) }));
+        messages.push({ role: 'user', content: results });
+      } else break;
+    } catch(e) {
+      clearTimeout(timeout);
+      if (e.name === 'AbortError') throw new Error('Request timed out — try again');
+      throw e;
+    }
   }
   return finalText || "Couldn't fetch data right now — try again.";
 }
