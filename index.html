@@ -135,7 +135,15 @@ function exportPDF(snapshots, contact) {
   const year = new Date().getFullYear();
 
   function renderText(text, color) {
-    const lines = text.replace(/\*\*/g,'').split('\n');
+    // Strip conversational filler openers
+    const cleaned = text
+      .replace(/\*\*/g,'')
+      .replace(/^Hey there[^\n]*\n/i, '')
+      .replace(/^Hey![^\n]*\n/i, '')
+      .replace(/^Hi there[^\n]*\n/i, '')
+      .replace(/^Okay[,!][^\n]*\n/i, '')
+      .replace(/^Let me (break|catch|walk)[^\n]*\n/i, '');
+    const lines = cleaned.split('\n');
     return lines.map(line => {
       const t = line.trim();
       if (!t) return '<div style="height:6px"></div>';
@@ -187,7 +195,11 @@ function exportPDF(snapshots, contact) {
 <style>
 *{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:Inter,sans-serif;background:#f0f4f0;width:820px;margin:0 auto;}
-@media print{body{width:100%;}}
+@media print{
+  body{width:100%;}
+  *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color-adjust:exact!important;}
+  .no-print{display:none!important;}
+}
 </style></head><body>
 <div style="background:linear-gradient(135deg,${DARK} 0%,${G} 65%,${LG} 100%);color:#fff;padding:44px 48px 32px;position:relative;overflow:hidden;">
   <div style="font-family:Oswald,sans-serif;font-size:10px;letter-spacing:5px;text-transform:uppercase;color:${LG};margin-bottom:10px;">Market Insights Newsletter</div>
@@ -221,7 +233,8 @@ ${contactBar}
 
   const w = window.open('','_blank','width=980,height=820,scrollbars=yes');
   if (!w) { alert('Please allow pop-ups to export the PDF.'); return; }
-  w.document.write(html);
+  const printTip = '<div style="background:#fef3c7;border:1px solid #f59e0b;padding:12px 20px;font-family:Inter,sans-serif;font-size:13px;color:#92400e;display:flex;align-items:center;gap:10px;" class="no-print">⚠️ <strong>Before saving as PDF:</strong> In the print dialog, turn on <strong>"Background graphics"</strong> (Chrome) or <strong>"Print backgrounds"</strong> (Safari/Firefox) to keep the colours and images.</div>';
+  w.document.write(printTip + html);
   w.document.close();
   setTimeout(() => { w.focus(); w.print(); }, 1200);
 }
